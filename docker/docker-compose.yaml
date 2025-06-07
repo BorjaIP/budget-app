@@ -1,0 +1,49 @@
+volumes:
+  gluetun:
+  ollama:
+
+networks:
+  budget-net:
+
+services:
+  gluetun:
+    image: qmcgaw/gluetun
+    container_name: gluetun
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - 11434:11434
+    volumes:
+      - gluetun:/gluetun
+    environment:
+      - VPN_SERVICE_PROVIDER=private internet access
+      - OPENVPN_USER=${OPENVPN_USER}
+      - OPENVPN_PASSWORD=${OPENVPN_PASSWORD}
+      - SERVER_REGIONS=france,switzerland,de_berlin
+
+  ollama:
+    image: docker.io/ollama/ollama:0.6.3
+    container_name: ollama
+    restart: unless-stopped
+    # Used in VPN
+    # ports:
+      # - 11434:11434
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+      - CUDA_VISIBLE_DEVICES=0
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    volumes:
+      - ollama:/root/.ollama
+    network_mode: "service:gluetun"
+    # networks:
+      # - budget-net
+    tty: true
+    deploy:
+        resources:
+          reservations:
+            devices:
+              - driver: nvidia
+                capabilities: [gpu]
+                count: all

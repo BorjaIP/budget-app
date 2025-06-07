@@ -192,3 +192,13 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+
+*.py[cod]
+*.db
+
+.states
+.web
+
+*.xls
+*.csv
+assets/external/

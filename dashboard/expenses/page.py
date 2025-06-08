@@ -5,7 +5,7 @@ from dashboard.expenses.view import TableView
 from dashboard.templates import template
 
 
-@template(route="/expenses", title="Gastos", on_load=TableState.load_entries)  # type: ignore
+@template(route="/expenses", title="Gastos", on_load=TableState.load_entries_from_database)  # type: ignore
 def expenses() -> rx.Component:
     """The table page.
 

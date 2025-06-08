@@ -8,6 +8,8 @@ from psutil import users
 from reflex.components.radix.themes.base import LiteralAccentColor
 
 from dashboard.expenses.state import TableState
+from dashboard.utils.file_reader import FileReader
+from dashboard.database.operations import db_manager
 
 # from dashboard.llm.prompt import PROMPT
 
@@ -21,36 +23,96 @@ class StatsState(rx.State):
     orders_data = []
     device_data = []
     yearly_device_data = []
+    is_loading: bool = False
 
     @rx.event
     def set_selected_tab(self, tab: str | list[str]):
         self.selected_tab = tab if isinstance(tab, str) else tab[0]
 
+    @rx.event
     def toggle_areachart(self):
         self.area_toggle = not self.area_toggle
 
-    # get_data from DB
+    @rx.event
+    async def refresh_data(self):
+        """Refresh chart data"""
+        self.is_loading = True
+        self.users_data = []  # Clear existing data
+        await self.randomize_data()  # Reload data
+        self.is_loading = False
+
+    # get_data from FileReader
     async def randomize_data(self):
         # If data is already populated, don't randomize
-
         if self.users_data:
-            # result = await query_llm(self.users_data[0]["concept"])
-            # print(result)
             return
+        
+        self.is_loading = True
 
-        # for i in range(30, -1, -1):  # Include today's data
-        #     self.revenue_data.append(
-        #         {
-        #             "Date": (datetime.datetime.now() - datetime.timedelta(days=i)).strftime(
-        #                 "%m-%d"
-        #             ),
-        #             "Revenue": random.randint(1000, 5000),
-        #         }
-        #     )
-
-        # _ = await query_llm(PROMPT)
-        state_expenses = await self.get_state(TableState)
-        self.users_data = [item.dict() for item in state_expenses.items]
+        try:
+            # Load data from database instead of file
+            db_expenses = db_manager.get_all_expenses()
+            
+            if not db_expenses:
+                print("No data found in database for charts")
+                self.users_data = []
+                return
+            
+            # Convert database expenses to records format
+            records = []
+            for expense in db_expenses:
+                record = {
+                    'operation_date': expense.operation_date,
+                    'value_date': expense.value_date,
+                    'concept': expense.concept,
+                    'amount': expense.amount,
+                    'salary': expense.salary
+                }
+                records.append(record)
+            
+            if records:
+                # Process and format data for charts using FileReader conversion
+                file_reader = FileReader()  # Create instance for number conversion
+                processed_data = []
+                for record in records:
+                    try:
+                        # Use FileReader method to convert European numbers to float for charts
+                        salary_value = file_reader.convert_european_number_to_float(record.get('salary', 0))
+                        amount_value = file_reader.convert_european_number_to_float(record.get('amount', 0))
+                        
+                        # Format operation_date if needed
+                        operation_date = str(record.get('operation_date', ''))
+                        
+                        processed_record = {
+                            'operation_date': operation_date,
+                            'value_date': str(record.get('value_date', '')),
+                            'concept': str(record.get('concept', '')),
+                            'amount': amount_value,
+                            'salary': salary_value
+                        }
+                        processed_data.append(processed_record)
+                    except (ValueError, TypeError) as e:
+                        print(f"Skipping record due to formatting error: {e}")
+                        continue
+                
+                self.users_data = processed_data
+                print(f"Loaded {len(self.users_data)} records for charts")
+                if len(processed_data) > 0:
+                    print(f"Sample record: {processed_data[0]}")
+                    print(f"Total records with valid salary: {len([r for r in processed_data if r['salary'] != 0])}")
+                
+                # Also populate revenue_data for potential future use
+                self.revenue_data = []
+                self.orders_data = []
+            else:
+                print("No data found for charts")
+                self.users_data = []
+                
+        except Exception as e:
+            print(f"Error loading chart data: {e}")
+            self.users_data = []
+        finally:
+            self.is_loading = False
 
         # self.device_data = [
         #     {"name": "Desktop", "value": 23, "fill": "var(--blue-8)"},
@@ -124,42 +186,67 @@ def _custom_tooltip(color: LiteralAccentColor):
 
 def users_chart() -> rx.Component:
     return rx.cond(
-        StatsState.area_toggle,
-        rx.recharts.area_chart(
-            _create_gradient("blue", "colorBlue"),
-            _custom_tooltip("blue"),
-            rx.recharts.cartesian_grid(
-                stroke_dasharray="3 3",
+        StatsState.is_loading,
+        rx.center(
+            rx.vstack(
+                rx.spinner(size="3"),
+                rx.text("Loading chart data...", size="2", color="gray"),
+                spacing="3",
+                align="center",
             ),
-            rx.recharts.area(
-                name="Saldo",
-                data_key="salary",
-                stroke=rx.color("blue", 9),
-                fill="url(#colorBlue)",
-                type_="monotone",
-            ),
-            rx.recharts.x_axis(data_key="operation_date", scale="auto"),
-            rx.recharts.y_axis(),
-            rx.recharts.legend(),
-            data=StatsState.users_data,
-            height=425,
+            height="425px",
         ),
-        rx.recharts.bar_chart(
-            rx.recharts.cartesian_grid(
-                stroke_dasharray="3 3",
+        rx.cond(
+            StatsState.users_data == [],
+            rx.center(
+                rx.vstack(
+                    rx.icon("chart-no-axes-combined", size=32, color="gray"),
+                    rx.text("No data available", size="4", weight="medium"),
+                    rx.text("Click 'Refresh Data' to load chart data", size="2", color="gray"),
+                    spacing="3",
+                    align="center",
+                ),
+                height="425px",
             ),
-            _custom_tooltip("blue"),
-            rx.recharts.bar(
-                name="Saldo",
-                data_key="salary",
-                stroke=rx.color("blue", 9),
-                fill=rx.color("blue", 7),
+            rx.cond(
+                StatsState.area_toggle,
+                rx.recharts.area_chart(
+                    _create_gradient("blue", "colorBlue"),
+                    _custom_tooltip("blue"),
+                    rx.recharts.cartesian_grid(
+                        stroke_dasharray="3 3",
+                    ),
+                    rx.recharts.area(
+                        name="Saldo",
+                        data_key="salary",
+                        stroke=rx.color("blue", 9),
+                        fill="url(#colorBlue)",
+                        type_="monotone",
+                    ),
+                    rx.recharts.x_axis(data_key="operation_date", scale="auto"),
+                    rx.recharts.y_axis(),
+                    rx.recharts.legend(),
+                    data=StatsState.users_data,
+                    height=425,
+                ),
+                rx.recharts.bar_chart(
+                    rx.recharts.cartesian_grid(
+                        stroke_dasharray="3 3",
+                    ),
+                    _custom_tooltip("blue"),
+                    rx.recharts.bar(
+                        name="Saldo",
+                        data_key="salary",
+                        stroke=rx.color("blue", 9),
+                        fill=rx.color("blue", 7),
+                    ),
+                    rx.recharts.x_axis(data_key="operation_date", scale="auto"),
+                    rx.recharts.y_axis(),
+                    rx.recharts.legend(),
+                    data=StatsState.users_data,
+                    height=425,
+                ),
             ),
-            rx.recharts.x_axis(data_key="operation_date", scale="auto"),
-            rx.recharts.y_axis(),
-            rx.recharts.legend(),
-            data=StatsState.users_data,
-            height=425,
         ),
     )
 

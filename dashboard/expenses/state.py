@@ -5,6 +5,9 @@ import pandas as pd
 import reflex as rx
 
 from dashboard.expenses.model import Item
+from dashboard.utils.file_reader import FileReader
+from dashboard.utils.file_processor import file_processor
+from dashboard.database.operations import db_manager
 
 
 class TableState(rx.State):
@@ -19,6 +22,11 @@ class TableState(rx.State):
     total_items: int = 0
     offset: int = 0
     limit: int = 12  # Number of rows per page
+    
+    # File upload state
+    upload_status: str = ""
+    is_uploading: bool = False
+    uploaded_files: List[str] = []
 
     @rx.var(cache=True)
     def filtered_sorted_items(self) -> List[Item]:
@@ -89,34 +97,130 @@ class TableState(rx.State):
     #         category = asyncio.run(query_llm(PROMPT, exp.concept))
     #         exp.category = category
 
-    def load_entries(self):
-        with Path("enero.xls").open(mode="rb") as file:
-            xls = pd.read_excel(file, sheet_name=None, engine="xlrd")
-
-            for _, df in xls.items():
-                # Rename columns
-                df = df.rename(columns={"Unnamed: 0": "operation_date"})
-                df = df.rename(columns={"Unnamed: 1": "value_date"})
-                df = df.rename(columns={"Cuenta Smart": "concept"})
-                df = df.rename(columns={"FECHA": "amount"})
-                df = df.rename(columns={"Unnamed: 4": "salary"})
-
-                # Find first row where 'salary' is a float
-                if "salary" in df.columns:
-                    for i, value in enumerate(df["salary"]):
-                        if isinstance(value, (int, float)) and not pd.isna(value):
-                            df = df.iloc[i:]  # Keep rows from first valid float onward
-                            break
-
-                reader = df.to_dict(orient="records")  # Each row as dict
-                items = [Item(**row) for row in reader]  # type: ignore
-
-                self.items = list(reversed(items))  # ordered list
+    def load_entries_from_database(self):
+        """Load entries from database"""
+        try:
+            # Get all expenses from database
+            db_expenses = db_manager.get_all_expenses()
+            
+            if db_expenses:
+                # Convert database models to Item objects for compatibility
+                items = []
+                for expense in db_expenses:
+                    item = Item(
+                        operation_date=expense.operation_date,
+                        value_date=expense.value_date,
+                        concept=expense.concept,
+                        amount=expense.amount,
+                        salary=expense.salary,
+                        category=expense.category
+                    )
+                    items.append(item)
+                
+                self.items = items  # Already ordered by created_at desc
                 self.total_items = len(self.items)
                 self.items_list = list(Item.__annotations__.keys())
-            # self.extract_category()
-            # print(self.items)
+                print(f"Successfully loaded {len(self.items)} entries from database")
+            else:
+                print("No data found in database")
+                self.items = []
+                self.total_items = 0
+        except Exception as e:
+            print(f"Error loading entries from database: {e}")
+            self.items = []
+            self.total_items = 0
+    
+    # Keep old method for backward compatibility, but redirect to database
+    def load_entries(self, filepath: str = ""):
+        """Load entries (redirects to database load)"""
+        self.load_entries_from_database()
+
+    async def handle_upload(self, files: list[rx.UploadFile]):
+        """Handle file upload using Reflex pattern"""
+        if not files:
+            self.upload_status = "No file selected"
+            return
+        
+        self.is_uploading = True
+        self.upload_status = "Processing file..."
+        
+        try:
+            for file in files:
+                # Check if filename exists
+                if not file.filename:
+                    self.upload_status = "❌ Invalid file"
+                    continue
+                
+                # Check file extension
+                if not file.filename.lower().endswith(('.xls', '.xlsx')):
+                    self.upload_status = "❌ Only Excel files (.xls, .xlsx) are allowed"
+                    continue
+                
+                # Save file to Reflex upload directory
+                upload_data = await file.read()
+                outfile = rx.get_upload_dir() / file.filename
+                
+                # Ensure upload directory exists
+                outfile.parent.mkdir(parents=True, exist_ok=True)
+                
+                # Write file to upload directory
+                with outfile.open("wb") as file_object:
+                    file_object.write(upload_data)
+                
+                # Process the uploaded file from the upload directory
+                result = file_processor.process_excel_file(str(outfile), replace_existing=True)
+                
+                if result["status"] == "success":
+                    self.upload_status = f"✅ {result['message']}"
+                    # Reload data from database
+                    self.load_entries_from_database()
+                    print(f"Upload successful: {result['count']} records processed")
+                    
+                    # Clean up uploaded file after processing
+                    try:
+                        outfile.unlink()
+                    except:
+                        pass  # File cleanup not critical
+                else:
+                    self.upload_status = f"❌ {result['message']}"
+                    print(f"Upload failed: {result['message']}")
+                
+        except Exception as e:
+            self.upload_status = f"❌ Upload failed: {str(e)}"
+            print(f"Upload error: {e}")
+        finally:
+            self.is_uploading = False
+    
+    def clear_upload_status(self):
+        """Clear upload status message"""
+        self.upload_status = ""
+    
+    def trigger_upload(self):
+        """Trigger file upload processing"""
+        return TableState.handle_upload(rx.upload_files(upload_id="upload-excel"))
+    
+    def simple_upload_trigger(self):
+        """Simple upload trigger without files parameter"""
+        self.upload_status = "Please select files first, then click to process"
+    
+    @rx.var
+    def get_upload_stats(self) -> str:
+        """Get upload statistics"""
+        try:
+            total_expenses = len(db_manager.get_all_expenses())
+            file_sources = db_manager.get_unique_file_sources()
+            return f"Database: {total_expenses} records from {len(file_sources)} files"
+        except Exception:
+            return "Database: No data"
+    
+    def get_database_files(self):
+        """Get list of unique file sources in database"""
+        try:
+            self.uploaded_files = db_manager.get_unique_file_sources()
+        except Exception as e:
+            print(f"Error getting database files: {e}")
+            self.uploaded_files = []
 
     def toggle_sort(self):
         self.sort_reverse = not self.sort_reverse
-        self.load_entries()
+        self.load_entries_from_database()

@@ -34,23 +34,60 @@ class FileReader:
         else:
             raise ValueError(f"No engine available for file type: {extension}")
     
+    # Known aliases for each target column across different bank export formats
+    _COLUMN_ALIASES: Dict[str, set] = {
+        "operation_date": {"Unnamed: 0", "FECHA OPERACIÓN", "FECHA OPERACION", "Fecha Operación"},
+        "value_date": {"Unnamed: 1", "FECHA VALOR", "Fecha Valor"},
+        "concept": {"Cuenta Smart", "CONCEPTO", "Concepto"},
+        "amount": {"FECHA", "IMPORTE EUR", "IMPORTE", "Importe"},
+        "salary": {"Unnamed: 4", "SALDO", "Saldo"},
+    }
+    _TARGET_COLUMNS = ["operation_date", "value_date", "concept", "amount", "salary"]
+
+    def _build_column_mapping(self, columns: List[str]) -> Dict[str, str]:
+        """Build a column name mapping using known aliases, with positional fallback."""
+        mapping: Dict[str, str] = {}
+        for target, aliases in self._COLUMN_ALIASES.items():
+            for col in columns:
+                if col in aliases:
+                    mapping[col] = target
+                    break
+
+        # If exactly one target is unmapped and one source column is unmapped, pair them
+        mapped_targets = set(mapping.values())
+        mapped_sources = set(mapping.keys())
+        unmapped_targets = [t for t in self._TARGET_COLUMNS if t not in mapped_targets]
+        unmapped_sources = [c for c in columns if c not in mapped_sources]
+        if len(unmapped_targets) == 1 and len(unmapped_sources) == 1:
+            mapping[unmapped_sources[0]] = unmapped_targets[0]
+
+        return mapping
+
+    def _is_date_value(self, value: Any) -> bool:
+        """Check if a value looks like a dd/mm/yyyy date."""
+        if not isinstance(value, str):
+            return False
+        import re
+        return bool(re.match(r"^\d{2}/\d{2}/\d{4}$", value.strip()))
+
     def _process_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
         """Process and clean the dataframe with column renaming and filtering"""
-        # Rename columns to match the Item model
-        column_mapping = {
-            "Unnamed: 0": "operation_date", # Fecha Operación   
-            "Unnamed: 1": "value_date", # Fecha Valor
-            "Cuenta Smart": "concept", # Concepto
-            "FECHA": "amount", # Importe
-            "Unnamed: 4": "salary" # Saldo
-        }
-        
+        columns = list(df.columns)
+        column_mapping = self._build_column_mapping(columns)
         df = df.rename(columns=column_mapping)
-        
-        # Find first row where 'salary' is a float and filter from there
+
+        # Drop rows where salary is NaN
         if "salary" in df.columns:
-            df = df.dropna(subset=["salary"])  # Remove rows where salary is NaN
-        
+            df = df.dropna(subset=["salary"])
+
+        # Filter out header-like rows (salary value is not numeric)
+        if "salary" in df.columns:
+            df = df[df["salary"].apply(
+                lambda v: isinstance(v, (int, float)) or (
+                    isinstance(v, str) and v.replace('.', '').replace(',', '').replace('-', '').strip().isdigit()
+                )
+            )]
+
         return df
     
     def read_file_to_records(self, filepath: str) -> List[Dict[str, Any]]:

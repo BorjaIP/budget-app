@@ -22,18 +22,16 @@ def menu_item(text: str, url: str) -> rx.Component:
     """
     # Whether the item is active.
     active = (rx.State.router.page.path == url.lower()) | (
-        (rx.State.router.page.path == "/") & text == "Overview"
+        (rx.State.router.page.path == "/") & text == "Resumen"
     )
 
     return rx.link(
         rx.hstack(
             rx.match(
                 text,
-                ("Overview", menu_item_icon("home")),
-                ("Table", menu_item_icon("table-2")),
-                ("About", menu_item_icon("book-open")),
-                ("Profile", menu_item_icon("user")),
-                ("Settings", menu_item_icon("settings")),
+                ("Resumen", menu_item_icon("home")),
+                ("Gastos", menu_item_icon("receipt")),
+                ("Ajustes", menu_item_icon("settings")),
                 menu_item_icon("layout-dashboard"),
             ),
             rx.text(text, size="4", weight="regular"),
@@ -82,18 +80,6 @@ def navbar_footer() -> rx.Component:
 
     """
     return rx.hstack(
-        rx.link(
-            rx.text("Docs", size="3"),
-            href="https://reflex.dev/docs/getting-started/introduction/",
-            color_scheme="gray",
-            underline="none",
-        ),
-        rx.link(
-            rx.text("Blog", size="3"),
-            href="https://reflex.dev/blog/",
-            color_scheme="gray",
-            underline="none",
-        ),
         rx.spacer(),
         rx.color_mode.button(style={"opacity": "0.8", "scale": "0.95"}),
         justify="start",
@@ -110,9 +96,7 @@ def menu_button() -> rx.Component:
     # The ordered page routes.
     ordered_page_routes = [
         "/",
-        "/table",
-        "/about",
-        "/profile",
+        "/expenses",
         "/settings",
     ]
 
@@ -180,10 +164,11 @@ def navbar() -> rx.Component:
     """
     return rx.el.nav(
         rx.hstack(
-            # The logo.
-            rx.color_mode_cond(
-                rx.image(src="/reflex_black.svg", height="1em"),
-                rx.image(src="/reflex_white.svg", height="1em"),
+            rx.hstack(
+                rx.icon("wallet", size=20, color=rx.color("teal", 9)),
+                rx.heading("Mi Presupuesto", size="3", weight="bold"),
+                align="center",
+                spacing="2",
             ),
             rx.spacer(),
             menu_button(),

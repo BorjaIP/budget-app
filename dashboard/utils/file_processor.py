@@ -1,4 +1,3 @@
-import os
 import shutil
 from pathlib import Path
 from typing import List, Optional
@@ -89,12 +88,6 @@ class FileProcessor:
             
             # Insert into database
             inserted_count = db_manager.insert_expenses(expenses, filename)
-            
-            # Clean up temp file
-            try:
-                os.remove(file_path)
-            except OSError:
-                pass  # File cleanup not critical
             
             return {
                 "status": "success",

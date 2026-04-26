@@ -1,3 +1,4 @@
+from datetime import datetime
 from pathlib import Path
 from typing import List
 
@@ -27,6 +28,7 @@ class TableState(rx.State):
     upload_status: str = ""
     is_uploading: bool = False
     uploaded_files: List[str] = []
+    show_upload_modal: bool = False
 
     @rx.var(cache=True)
     def filtered_sorted_items(self) -> List[Item]:
@@ -34,12 +36,24 @@ class TableState(rx.State):
 
         # Filter items based on selected item
         if self.sort_value:
-            if self.sort_value in ["amount"]:
+            if self.sort_value in ["amount", "salary"]:
                 items = sorted(
                     items,
-                    key=lambda item: float(getattr(item, self.sort_value)),
+                    key=lambda item: float(
+                        str(getattr(item, self.sort_value))
+                        .replace('.', '').replace(',', '.')
+                    ),
                     reverse=self.sort_reverse,
                 )
+            elif self.sort_value in ["operation_date", "value_date"]:
+                def _parse_date(item):
+                    try:
+                        return datetime.strptime(
+                            getattr(item, self.sort_value), "%d/%m/%Y"
+                        )
+                    except (ValueError, TypeError):
+                        return datetime.min
+                items = sorted(items, key=_parse_date, reverse=self.sort_reverse)
             else:
                 items = sorted(
                     items,
@@ -59,6 +73,10 @@ class TableState(rx.State):
             ]
 
         return items
+
+    @rx.var(cache=True)
+    def filtered_count(self) -> int:
+        return len(self.filtered_sorted_items)
 
     @rx.var(cache=True)
     def get_item_list(self) -> list[str]:
@@ -158,7 +176,7 @@ class TableState(rx.State):
                 
                 # Save file to Reflex upload directory
                 upload_data = await file.read()
-                outfile = rx.get_upload_dir() / file.filename
+                outfile = rx.get_upload_dir() / Path(file.filename).name
                 
                 # Ensure upload directory exists
                 outfile.parent.mkdir(parents=True, exist_ok=True)
@@ -191,17 +209,15 @@ class TableState(rx.State):
         finally:
             self.is_uploading = False
     
-    def clear_upload_status(self):
-        """Clear upload status message"""
+    def open_upload_modal(self):
+        """Open the upload modal and reset status"""
         self.upload_status = ""
-    
-    def trigger_upload(self):
-        """Trigger file upload processing"""
-        return TableState.handle_upload(rx.upload_files(upload_id="upload-excel"))
-    
-    def simple_upload_trigger(self):
-        """Simple upload trigger without files parameter"""
-        self.upload_status = "Please select files first, then click to process"
+        self.show_upload_modal = True
+        return rx.clear_selected_files("upload-excel")
+
+    def close_upload_modal(self):
+        """Close the upload modal"""
+        self.show_upload_modal = False
     
     @rx.var
     def get_upload_stats(self) -> str:

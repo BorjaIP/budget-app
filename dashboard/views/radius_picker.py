@@ -8,7 +8,7 @@ def radius_picker() -> rx.Component:
         rx.vstack(
             rx.hstack(
                 rx.icon("radius"),
-                rx.heading("Radius", size="6"),
+                rx.heading("Radio de bordes", size="6"),
                 align="center",
             ),
             rx.select(

@@ -30,7 +30,17 @@ class TableView:
             rx.table.row_header_cell(item.operation_date),
             rx.table.row_header_cell(item.value_date),
             rx.table.row_header_cell(item.concept),
-            rx.table.cell(f"€{item.amount}"),
+            rx.table.cell(
+                rx.text(
+                    f"€{item.amount}",
+                    color=rx.cond(
+                        item.amount.contains("-"),
+                        rx.color("red", 11),
+                        rx.color("green", 11),
+                    ),
+                    weight="medium",
+                ),
+            ),
             rx.table.cell(item.salary),
             style={"_hover": {"bg": hover_color}, "bg": bg_color},
             align="center",
@@ -40,9 +50,10 @@ class TableView:
         return (
             rx.hstack(
                 rx.text(
-                    "Page ",
+                    "Página ",
                     rx.code(TableState.page_number),
-                    f" of {TableState.total_pages}",
+                    " de ",
+                    rx.code(TableState.total_pages),
                     justify="end",
                 ),
                 rx.hstack(
@@ -94,6 +105,113 @@ class TableView:
             ),
         )
 
+    def _upload_modal(self) -> rx.Component:
+        return rx.dialog.root(
+            rx.dialog.content(
+                rx.dialog.title("Subir Archivo Excel"),
+                rx.dialog.description(
+                    "Selecciona un archivo de exportación bancaria (.xls o .xlsx) para importar gastos.",
+                    size="2",
+                    margin_bottom="16px",
+                ),
+                rx.vstack(
+                    rx.upload(
+                        rx.vstack(
+                            rx.icon("upload", size=32, color="gray"),
+                            rx.text(
+                                rx.cond(
+                                    TableState.is_uploading,
+                                    "Procesando archivo...",
+                                    "Arrastra un archivo Excel aquí o haz clic para seleccionar",
+                                ),
+                                size="2",
+                                text_align="center",
+                            ),
+                            rx.foreach(
+                                rx.selected_files("upload-excel"),
+                                lambda f: rx.hstack(
+                                    rx.icon("file-spreadsheet", size=16, color="blue"),
+                                    rx.text(f, size="2", weight="medium", color="blue"),
+                                    align="center",
+                                    spacing="2",
+                                ),
+                            ),
+                            align="center",
+                            spacing="2",
+                        ),
+                        id="upload-excel",
+                        multiple=False,
+                        accept={
+                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
+                            "application/vnd.ms-excel": [".xls"],
+                        },
+                        max_files=1,
+                        border="2px dashed #ccc",
+                        padding="2em",
+                        border_radius="8px",
+                        width="100%",
+                        min_height="120px",
+                        display="flex",
+                        align_items="center",
+                        justify_content="center",
+                        cursor="pointer",
+                        _hover={"border_color": "blue.500"},
+                    ),
+                    rx.cond(
+                        TableState.upload_status != "",
+                        rx.callout.root(
+                            rx.callout.text(TableState.upload_status),
+                            color_scheme=rx.cond(
+                                TableState.upload_status.startswith("❌"),
+                                "red",
+                                "green",
+                            ),
+                            width="100%",
+                        ),
+                    ),
+                    rx.text(
+                        TableState.get_upload_stats,
+                        size="1",
+                        color="gray",
+                    ),
+                    spacing="4",
+                    width="100%",
+                ),
+                rx.flex(
+                    rx.dialog.close(
+                        rx.button(
+                            "Cerrar",
+                            variant="soft",
+                            color_scheme="gray",
+                        ),
+                    ),
+                    rx.button(
+                        rx.cond(
+                            TableState.is_uploading,
+                            rx.spinner(size="1"),
+                            rx.icon("upload", size=18),
+                        ),
+                        "Procesar Archivo",
+                        size="3",
+                        variant="solid",
+                        color_scheme="blue",
+                        cursor="pointer",
+                        on_click=TableState.handle_upload(  # type: ignore
+                            rx.upload_files(upload_id="upload-excel")
+                        ),
+                        disabled=TableState.is_uploading,
+                    ),
+                    spacing="3",
+                    margin_top="16px",
+                    justify="end",
+                    width="100%",
+                ),
+                max_width="480px",
+            ),
+            open=TableState.show_upload_modal,
+            on_open_change=TableState.set_show_upload_modal,  # type: ignore
+        )
+
     def get_filters(self):
         return (
             rx.flex(
@@ -119,7 +237,7 @@ class TableView:
                     ),
                     rx.select(
                         TableState.get_item_list,
-                        placeholder="Sort By: ",
+                        placeholder="Ordenar por: ",
                         size="3",
                         on_change=TableState.set_sort_value,  # type: ignore
                     ),
@@ -133,7 +251,7 @@ class TableView:
                             display=rx.cond(TableState.search_value, "flex", "none"),
                         ),
                         value=TableState.search_value,
-                        placeholder="Search here...",
+                        placeholder="Buscar...",
                         size="3",
                         max_width=["150px", "150px", "200px", "250px"],
                         width="100%",
@@ -146,84 +264,25 @@ class TableView:
                     spacing="3",
                 ),
                 rx.hstack(
-                    rx.upload(
-                        rx.text(
-                            rx.cond(
-                                TableState.is_uploading,
-                                "Processing file...",
-                                "Drop Excel file here or click to select",
-                            ),
-                            size="2",
-                            text_align="center",
-                        ),
-                        id="upload-excel",
-                        multiple=False,
-                        accept={"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"], "application/vnd.ms-excel": [".xls"]},
-                        max_files=1,
-                        border="2px dashed #ccc",
-                        padding="2em",
-                        border_radius="8px",
-                        width="250px",
-                        height="100px",
-                        display="flex",
-                        align_items="center",
-                        justify_content="center",
-                        cursor="pointer",
-                        _hover={"border_color": "blue.500"},
-                        on_drop=TableState.simple_upload_trigger,  # type: ignore
-                    ),
                     rx.button(
-                        rx.icon("play", size=18),
-                        "Process Files",
+                        rx.icon("upload", size=18),
+                        "Subir Archivo",
                         size="3",
                         variant="solid",
                         color_scheme="blue",
                         cursor="pointer",
-                        on_click=lambda: TableState.handle_upload(files=rx.upload_files(upload_id="upload-excel")),  # type: ignore
-                        disabled=TableState.is_uploading,
+                        on_click=TableState.open_upload_modal,  # type: ignore
                     ),
                     rx.button(
                         rx.icon("refresh-cw", size=18),
-                        "Refresh",
+                        "Actualizar",
                         size="3",
                         variant="outline",
                         cursor="pointer",
                         on_click=TableState.load_entries_from_database,  # type: ignore
                     ),
-                    rx.vstack(
-                        rx.cond(
-                            TableState.upload_status != "",
-                            rx.text(
-                                TableState.upload_status,
-                                size="1",
-                                color=rx.cond(
-                                    TableState.upload_status.startswith("❌"),
-                                    "red",
-                                    "green",
-                                ),
-                                max_width="200px",
-                                text_align="center",
-                            ),
-                        ),
-                        rx.text(
-                            TableState.get_upload_stats,
-                            size="1",
-                            color="gray",
-                            text_align="center",
-                        ),
-                        rx.text(
-                            "1. Select Excel file above → 2. Click 'Process Files' → 3. View data in table",
-                            size="1",
-                            color="gray",
-                            opacity="0.7",
-                            text_align="center",
-                            max_width="300px",
-                        ),
-                        spacing="1",
-                    ),
-                    spacing="2",
+                    spacing="3",
                     align="center",
-                    display=["none", "none", "none", "flex"],
                 ),
                 spacing="3",
                 justify="between",
@@ -257,6 +316,17 @@ class TableView:
     def main_table(self) -> rx.Component:
         return rx.box(
             self.get_filters(),
+            self._upload_modal(),
+            rx.text(
+                "Mostrando ",
+                rx.text.strong(TableState.filtered_count),
+                " de ",
+                rx.text.strong(TableState.total_items),
+                " gastos",
+                size="2",
+                color=rx.color("gray", 10),
+                margin_bottom="0.5em",
+            ),
             rx.table.root(
                 self.get_header(),
                 self.get_body(),

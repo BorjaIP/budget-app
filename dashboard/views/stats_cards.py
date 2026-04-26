@@ -2,26 +2,15 @@ import reflex as rx
 from reflex.components.radix.themes.base import LiteralAccentColor
 
 from .. import styles
+from ..views.charts import StatsState
 
 
-def stats_card(
+def budget_stat_card(
     stat_name: str,
-    value: int,
-    prev_value: int,
+    value_var: rx.Var[str],
     icon: str,
     icon_color: LiteralAccentColor,
-    extra_char: str = "",
 ) -> rx.Component:
-    percentage_change = (
-        round(((value - prev_value) / prev_value) * 100, 2)
-        if prev_value != 0
-        else 0
-        if value == 0
-        else float("inf")
-    )
-    change = "increase" if value > prev_value else "decrease"
-    arrow_icon = "trending-up" if value > prev_value else "trending-down"
-    arrow_color = "grass" if value > prev_value else "tomato"
     return rx.card(
         rx.vstack(
             rx.hstack(
@@ -33,7 +22,7 @@ def stats_card(
                 ),
                 rx.vstack(
                     rx.heading(
-                        f"{extra_char}{value:,}",
+                        value_var,
                         size="6",
                         weight="bold",
                     ),
@@ -48,30 +37,6 @@ def stats_card(
                 align="center",
                 width="100%",
             ),
-            rx.hstack(
-                rx.hstack(
-                    rx.icon(
-                        tag=arrow_icon,
-                        size=24,
-                        color=rx.color(arrow_color, 9),
-                    ),
-                    rx.text(
-                        f"{percentage_change}%",
-                        size="3",
-                        color=rx.color(arrow_color, 9),
-                        weight="medium",
-                    ),
-                    spacing="2",
-                    align="center",
-                ),
-                rx.text(
-                    f"{change} from last month",
-                    size="2",
-                    color=rx.color("gray", 10),
-                ),
-                align="center",
-                width="100%",
-            ),
             spacing="3",
         ),
         size="3",
@@ -80,29 +45,25 @@ def stats_card(
     )
 
 
-def stats_cards() -> rx.Component:
+def budget_stats_cards() -> rx.Component:
     return rx.grid(
-        stats_card(
-            stat_name="Users",
-            value=4200,
-            prev_value=3000,
-            icon="users",
-            icon_color="blue",
-        ),
-        stats_card(
-            stat_name="Revenue",
-            value=12000,
-            prev_value=15000,
-            icon="dollar-sign",
+        budget_stat_card(
+            stat_name="Total Ingresos",
+            value_var=StatsState.total_ingresos_fmt,
+            icon="trending-up",
             icon_color="green",
-            extra_char="$",
         ),
-        stats_card(
-            stat_name="Orders",
-            value=300,
-            prev_value=250,
-            icon="shopping-cart",
-            icon_color="purple",
+        budget_stat_card(
+            stat_name="Total Gastos",
+            value_var=StatsState.total_gastos_fmt,
+            icon="trending-down",
+            icon_color="red",
+        ),
+        budget_stat_card(
+            stat_name="Saldo Neto",
+            value_var=StatsState.saldo_neto_fmt,
+            icon="wallet",
+            icon_color="teal",
         ),
         gap="1rem",
         grid_template_columns=[

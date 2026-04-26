@@ -1,377 +1,326 @@
-import asyncio
-import datetime
-import random
+from collections import defaultdict
+from datetime import datetime, timedelta
 
-import httpx
 import reflex as rx
-from psutil import users
 from reflex.components.radix.themes.base import LiteralAccentColor
 
-from dashboard.expenses.state import TableState
-from dashboard.utils.file_reader import FileReader
 from dashboard.database.operations import db_manager
-
-# from dashboard.llm.prompt import PROMPT
+from dashboard.utils.file_reader import FileReader
 
 
 class StatsState(rx.State):
-    area_toggle: bool = True
-    selected_tab: str = "users"
-    timeframe: str = "Monthly"
-    users_data = []
-    revenue_data = []
-    orders_data = []
-    device_data = []
-    yearly_device_data = []
+    date_filter: str = "all"
+    chart_data: list[dict] = []
     is_loading: bool = False
 
-    @rx.event
-    def set_selected_tab(self, tab: str | list[str]):
-        self.selected_tab = tab if isinstance(tab, str) else tab[0]
-
-    @rx.event
-    def toggle_areachart(self):
-        self.area_toggle = not self.area_toggle
-
-    @rx.event
-    async def refresh_data(self):
-        """Refresh chart data"""
-        self.is_loading = True
-        self.users_data = []  # Clear existing data
-        await self.randomize_data()  # Reload data
-        self.is_loading = False
-
-    # get_data from FileReader
-    async def randomize_data(self):
-        # If data is already populated, don't randomize
-        if self.users_data:
-            return
-        
-        self.is_loading = True
-
+    def _parse_date(self, date_str: str) -> datetime | None:
+        """Parse dd/mm/yyyy date string."""
         try:
-            # Load data from database instead of file
+            return datetime.strptime(date_str.strip(), "%d/%m/%Y")
+        except (ValueError, AttributeError):
+            return None
+
+    def _get_date_range(self) -> tuple[datetime | None, datetime | None]:
+        """Compute start/end dates based on current filter."""
+        now = datetime.now()
+        if self.date_filter == "1m":
+            return now - timedelta(days=30), now
+        elif self.date_filter == "6m":
+            return now - timedelta(days=180), now
+        elif self.date_filter == "1y":
+            return now - timedelta(days=365), now
+        else:  # "all"
+            return None, None
+
+    @rx.event
+    async def load_chart_data(self):
+        """Load expenses from DB, aggregate by date into ingresos/gastos/saldo."""
+        self.is_loading = True
+        try:
             db_expenses = db_manager.get_all_expenses()
-            
             if not db_expenses:
-                print("No data found in database for charts")
-                self.users_data = []
+                self.chart_data = []
                 return
-            
-            # Convert database expenses to records format
-            records = []
-            for expense in db_expenses:
-                record = {
-                    'operation_date': expense.operation_date,
-                    'value_date': expense.value_date,
-                    'concept': expense.concept,
-                    'amount': expense.amount,
-                    'salary': expense.salary
-                }
-                records.append(record)
-            
-            if records:
-                # Process and format data for charts using FileReader conversion
-                file_reader = FileReader()  # Create instance for number conversion
-                processed_data = []
-                for record in records:
-                    try:
-                        # Use FileReader method to convert European numbers to float for charts
-                        salary_value = file_reader.convert_european_number_to_float(record.get('salary', 0))
-                        amount_value = file_reader.convert_european_number_to_float(record.get('amount', 0))
-                        
-                        # Format operation_date if needed
-                        operation_date = str(record.get('operation_date', ''))
-                        
-                        processed_record = {
-                            'operation_date': operation_date,
-                            'value_date': str(record.get('value_date', '')),
-                            'concept': str(record.get('concept', '')),
-                            'amount': amount_value,
-                            'salary': salary_value
-                        }
-                        processed_data.append(processed_record)
-                    except (ValueError, TypeError) as e:
-                        print(f"Skipping record due to formatting error: {e}")
-                        continue
-                
-                self.users_data = processed_data
-                print(f"Loaded {len(self.users_data)} records for charts")
-                if len(processed_data) > 0:
-                    print(f"Sample record: {processed_data[0]}")
-                    print(f"Total records with valid salary: {len([r for r in processed_data if r['salary'] != 0])}")
-                
-                # Also populate revenue_data for potential future use
-                self.revenue_data = []
-                self.orders_data = []
-            else:
-                print("No data found for charts")
-                self.users_data = []
-                
+
+            file_reader = FileReader()
+            date_start, date_end = self._get_date_range()
+
+            # Parse and filter records
+            parsed: list[tuple[datetime, float, float]] = []
+            for exp in db_expenses:
+                dt = self._parse_date(exp.operation_date)
+                if dt is None:
+                    continue
+                if date_start and dt < date_start:
+                    continue
+                if date_end and dt > date_end:
+                    continue
+                amount = file_reader.convert_european_number_to_float(exp.amount)
+                salary = file_reader.convert_european_number_to_float(exp.salary)
+                parsed.append((dt, amount, salary))
+
+            if not parsed:
+                self.chart_data = []
+                return
+
+            # Aggregate by date
+            ingresos: dict[str, float] = defaultdict(float)
+            gastos: dict[str, float] = defaultdict(float)
+            saldo: dict[str, float] = {}
+
+            for dt, amount, salary in parsed:
+                key = dt.strftime("%d/%m/%Y")
+                if amount > 0:
+                    ingresos[key] += amount
+                else:
+                    gastos[key] += abs(amount)
+                # Keep last saldo for each date
+                saldo[key] = salary
+
+            # Build sorted result
+            all_dates = set(ingresos.keys()) | set(gastos.keys()) | set(saldo.keys())
+            result = []
+            for date_str in all_dates:
+                dt = datetime.strptime(date_str, "%d/%m/%Y")
+                result.append({
+                    "date": date_str,
+                    "_sort": dt.timestamp(),
+                    "ingresos": round(ingresos.get(date_str, 0), 2),
+                    "gastos": round(gastos.get(date_str, 0), 2),
+                    "saldo": round(saldo.get(date_str, 0), 2),
+                })
+
+            result.sort(key=lambda r: r["_sort"])
+            # Remove sort key before sending to frontend
+            for r in result:
+                del r["_sort"]
+
+            self.chart_data = result
         except Exception as e:
             print(f"Error loading chart data: {e}")
-            self.users_data = []
+            self.chart_data = []
         finally:
             self.is_loading = False
 
-        # self.device_data = [
-        #     {"name": "Desktop", "value": 23, "fill": "var(--blue-8)"},
-        #     {"name": "Mobile", "value": 47, "fill": "var(--green-8)"},
-        #     {"name": "Tablet", "value": 25, "fill": "var(--purple-8)"},
-        #     {"name": "Other", "value": 5, "fill": "var(--red-8)"},
-        # ]
+    @rx.var(cache=True)
+    def total_ingresos_fmt(self) -> str:
+        total = sum(d.get("ingresos", 0) for d in self.chart_data)
+        return f"{total:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
 
-        # self.yearly_device_data = [
-        #     {"name": "Desktop", "value": 34, "fill": "var(--blue-8)"},
-        #     {"name": "Mobile", "value": 46, "fill": "var(--green-8)"},
-        #     {"name": "Tablet", "value": 21, "fill": "var(--purple-8)"},
-        #     {"name": "Other", "value": 9, "fill": "var(--red-8)"},
-        # ]
+    @rx.var(cache=True)
+    def total_gastos_fmt(self) -> str:
+        total = sum(d.get("gastos", 0) for d in self.chart_data)
+        return f"{total:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
+
+    @rx.var(cache=True)
+    def saldo_neto_fmt(self) -> str:
+        if not self.chart_data:
+            return "0,00 €"
+        last = self.chart_data[-1].get("saldo", 0)
+        return f"{last:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
+
+    @rx.event
+    async def set_date_preset(self, value: str | list[str]):
+        """Set a date filter preset and reload data."""
+        self.date_filter = value if isinstance(value, str) else value[0]
+        await self.load_chart_data()
 
 
-def area_toggle() -> rx.Component:
-    """Toggle between area and bar chart."""
-    return rx.cond(
-        StatsState.area_toggle,
-        rx.icon_button(
-            rx.icon("area-chart"),
-            size="2",
-            cursor="pointer",
-            variant="surface",
-            on_click=StatsState.toggle_areachart,
-        ),
-        rx.icon_button(
-            rx.icon("bar-chart-3"),
-            size="2",
-            cursor="pointer",
-            variant="surface",
-            on_click=StatsState.toggle_areachart,
-        ),
-    )
+
+# ---------------------------------------------------------------------------
+# Reusable chart helpers
+# ---------------------------------------------------------------------------
+
+_Y_TICK_FORMATTER = rx.Var(
+    "(value) => {"
+    "  if (Math.abs(value) >= 1000000) return (value / 1000000).toFixed(1) + 'M €';"
+    "  if (Math.abs(value) >= 1000) return (value / 1000).toFixed(1) + 'K €';"
+    "  return value + ' €';"
+    "}"
+)
 
 
 def _create_gradient(color: LiteralAccentColor, id: str):
-    """Create a gradient for the area chart."""
-    return (
-        rx.el.svg.defs(
-            rx.el.svg.linear_gradient(
-                rx.el.svg.stop(stop_color=rx.color(color, 7), offset="5%", stop_opacity=0.8),
-                rx.el.svg.stop(stop_color=rx.color(color, 7), offset="95%", stop_opacity=0),
-                x1=0,
-                x2=0,
-                y1=0,
-                y2=1,
-                id=id,
-            ),
+    """Create a gradient for area charts."""
+    return rx.el.svg.defs(
+        rx.el.svg.linear_gradient(
+            rx.el.svg.stop(stop_color=rx.color(color, 7), offset="5%", stop_opacity=0.8),
+            rx.el.svg.stop(stop_color=rx.color(color, 7), offset="95%", stop_opacity=0),
+            x1=0, x2=0, y1=0, y2=1,
+            id=id,
         ),
     )
 
 
 def _custom_tooltip(color: LiteralAccentColor):
-    return (
-        rx.recharts.graphing_tooltip(
-            separator=" : ",
-            content_style={
-                "backgroundColor": rx.color("gray", 1),
-                "borderRadius": "var(--radius-2)",
-                "borderWidth": "1px",
-                "borderColor": rx.color(color, 7),
-                "padding": "0.5rem",
-                "boxShadow": "0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)",
-            },
-            is_animation_active=True,
-        ),
+    return rx.recharts.graphing_tooltip(
+        separator=" : ",
+        content_style={
+            "backgroundColor": rx.color("gray", 1),
+            "borderRadius": "var(--radius-2)",
+            "borderWidth": "1px",
+            "borderColor": rx.color(color, 7),
+            "padding": "0.5rem",
+            "boxShadow": "0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)",
+        },
+        is_animation_active=True,
     )
 
 
-def users_chart() -> rx.Component:
+def _empty_chart_placeholder() -> rx.Component:
+    return rx.center(
+        rx.vstack(
+            rx.icon("chart-no-axes-combined", size=32, color="gray"),
+            rx.text("No hay datos disponibles", size="4", weight="medium"),
+            spacing="3",
+            align="center",
+        ),
+        height="300px",
+    )
+
+
+def _loading_placeholder() -> rx.Component:
+    return rx.center(
+        rx.vstack(
+            rx.spinner(size="3"),
+            rx.text("Cargando datos...", size="2", color="gray"),
+            spacing="3",
+            align="center",
+        ),
+        height="300px",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Date filter controls
+# ---------------------------------------------------------------------------
+
+def date_filter_controls() -> rx.Component:
+    return rx.hstack(
+        rx.segmented_control.root(
+            rx.segmented_control.item("Todo", value="all"),
+            rx.segmented_control.item("1 Mes", value="1m"),
+            rx.segmented_control.item("6 Meses", value="6m"),
+            rx.segmented_control.item("1 Ano", value="1y"),
+            value=StatsState.date_filter,
+            on_change=StatsState.set_date_preset,
+        ),
+        spacing="4",
+        align="center",
+        wrap="wrap",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Three chart components
+# ---------------------------------------------------------------------------
+
+def ingresos_chart() -> rx.Component:
     return rx.cond(
         StatsState.is_loading,
-        rx.center(
-            rx.vstack(
-                rx.spinner(size="3"),
-                rx.text("Loading chart data...", size="2", color="gray"),
-                spacing="3",
-                align="center",
-            ),
-            height="425px",
-        ),
+        _loading_placeholder(),
         rx.cond(
-            StatsState.users_data == [],
-            rx.center(
-                rx.vstack(
-                    rx.icon("chart-no-axes-combined", size=32, color="gray"),
-                    rx.text("No data available", size="4", weight="medium"),
-                    rx.text("Click 'Refresh Data' to load chart data", size="2", color="gray"),
-                    spacing="3",
-                    align="center",
+            StatsState.chart_data.length() == 0,
+            _empty_chart_placeholder(),
+            rx.recharts.line_chart(
+                _custom_tooltip("green"),
+                rx.recharts.cartesian_grid(stroke_dasharray="3 3"),
+                rx.recharts.line(
+                    name="Ingresos",
+                    data_key="ingresos",
+                    stroke=rx.color("green", 9),
+                    type_="monotone",
                 ),
-                height="425px",
-            ),
-            rx.cond(
-                StatsState.area_toggle,
-                rx.recharts.area_chart(
-                    _create_gradient("blue", "colorBlue"),
-                    _custom_tooltip("blue"),
-                    rx.recharts.cartesian_grid(
-                        stroke_dasharray="3 3",
-                    ),
-                    rx.recharts.area(
-                        name="Saldo",
-                        data_key="salary",
-                        stroke=rx.color("blue", 9),
-                        fill="url(#colorBlue)",
-                        type_="monotone",
-                    ),
-                    rx.recharts.x_axis(data_key="operation_date", scale="auto"),
-                    rx.recharts.y_axis(),
-                    rx.recharts.legend(),
-                    data=StatsState.users_data,
-                    height=425,
-                ),
-                rx.recharts.bar_chart(
-                    rx.recharts.cartesian_grid(
-                        stroke_dasharray="3 3",
-                    ),
-                    _custom_tooltip("blue"),
-                    rx.recharts.bar(
-                        name="Saldo",
-                        data_key="salary",
-                        stroke=rx.color("blue", 9),
-                        fill=rx.color("blue", 7),
-                    ),
-                    rx.recharts.x_axis(data_key="operation_date", scale="auto"),
-                    rx.recharts.y_axis(),
-                    rx.recharts.legend(),
-                    data=StatsState.users_data,
-                    height=425,
-                ),
+                rx.recharts.x_axis(data_key="date", scale="auto"),
+                rx.recharts.y_axis(tick_formatter=_Y_TICK_FORMATTER),
+                rx.recharts.legend(),
+                data=StatsState.chart_data,
+                height=300,
             ),
         ),
     )
 
 
-def revenue_chart() -> rx.Component:
+def gastos_chart() -> rx.Component:
     return rx.cond(
-        StatsState.area_toggle,
-        rx.recharts.area_chart(
-            _create_gradient("green", "colorGreen"),
-            _custom_tooltip("green"),
-            rx.recharts.cartesian_grid(
-                stroke_dasharray="3 3",
+        StatsState.is_loading,
+        _loading_placeholder(),
+        rx.cond(
+            StatsState.chart_data.length() == 0,
+            _empty_chart_placeholder(),
+            rx.recharts.line_chart(
+                _custom_tooltip("red"),
+                rx.recharts.cartesian_grid(stroke_dasharray="3 3"),
+                rx.recharts.line(
+                    name="Gastos",
+                    data_key="gastos",
+                    stroke=rx.color("red", 9),
+                    type_="monotone",
+                ),
+                rx.recharts.x_axis(data_key="date", scale="auto"),
+                rx.recharts.y_axis(tick_formatter=_Y_TICK_FORMATTER),
+                rx.recharts.legend(),
+                data=StatsState.chart_data,
+                height=300,
             ),
-            rx.recharts.area(
-                data_key="Revenue",
-                stroke=rx.color("green", 9),
-                fill="url(#colorGreen)",
-                type_="monotone",
-            ),
-            rx.recharts.x_axis(data_key="Date", scale="auto"),
-            rx.recharts.y_axis(),
-            rx.recharts.legend(),
-            data=StatsState.revenue_data,
-            height=425,
-        ),
-        rx.recharts.bar_chart(
-            _custom_tooltip("green"),
-            rx.recharts.cartesian_grid(
-                stroke_dasharray="3 3",
-            ),
-            rx.recharts.bar(
-                data_key="Revenue",
-                stroke=rx.color("green", 9),
-                fill=rx.color("green", 7),
-            ),
-            rx.recharts.x_axis(data_key="Date", scale="auto"),
-            rx.recharts.y_axis(),
-            rx.recharts.legend(),
-            data=StatsState.revenue_data,
-            height=425,
         ),
     )
 
 
-def orders_chart() -> rx.Component:
+def ingresos_gastos_chart() -> rx.Component:
+    """Combined bar chart with Ingresos (green) and Gastos (red) side by side."""
     return rx.cond(
-        StatsState.area_toggle,
-        rx.recharts.area_chart(
-            _create_gradient("purple", "colorPurple"),
-            _custom_tooltip("purple"),
-            rx.recharts.cartesian_grid(
-                stroke_dasharray="3 3",
+        StatsState.is_loading,
+        _loading_placeholder(),
+        rx.cond(
+            StatsState.chart_data.length() == 0,
+            _empty_chart_placeholder(),
+            rx.recharts.bar_chart(
+                _custom_tooltip("teal"),
+                rx.recharts.cartesian_grid(stroke_dasharray="3 3"),
+                rx.recharts.bar(
+                    name="Ingresos",
+                    data_key="ingresos",
+                    fill=rx.color("green", 9),
+                ),
+                rx.recharts.bar(
+                    name="Gastos",
+                    data_key="gastos",
+                    fill=rx.color("red", 9),
+                ),
+                rx.recharts.x_axis(data_key="date", scale="auto"),
+                rx.recharts.y_axis(tick_formatter=_Y_TICK_FORMATTER),
+                rx.recharts.legend(),
+                data=StatsState.chart_data,
+                height=300,
             ),
-            rx.recharts.area(
-                data_key="Orders",
-                stroke=rx.color("purple", 9),
-                fill="url(#colorPurple)",
-                type_="monotone",
-            ),
-            rx.recharts.x_axis(data_key="Date", scale="auto"),
-            rx.recharts.y_axis(),
-            rx.recharts.legend(),
-            data=StatsState.orders_data,
-            height=425,
-        ),
-        rx.recharts.bar_chart(
-            _custom_tooltip("purple"),
-            rx.recharts.cartesian_grid(
-                stroke_dasharray="3 3",
-            ),
-            rx.recharts.bar(
-                data_key="Orders",
-                stroke=rx.color("purple", 9),
-                fill=rx.color("purple", 7),
-            ),
-            rx.recharts.x_axis(data_key="Date", scale="auto"),
-            rx.recharts.y_axis(),
-            rx.recharts.legend(),
-            data=StatsState.orders_data,
-            height=425,
         ),
     )
 
 
-# def pie_chart() -> rx.Component:
-#     return rx.cond(
-#         StatsState.timeframe == "Yearly",
-#         rx.recharts.pie_chart(
-#             rx.recharts.pie(
-#                 data=StatsState.yearly_device_data,
-#                 data_key="value",
-#                 name_key="name",
-#                 cx="50%",
-#                 cy="50%",
-#                 padding_angle=1,
-#                 inner_radius="70",
-#                 outer_radius="100",
-#                 label=True,
-#             ),
-#             rx.recharts.legend(),
-#             height=300,
-#         ),
-#         rx.recharts.pie_chart(
-#             rx.recharts.pie(
-#                 data=StatsState.device_data,
-#                 data_key="value",
-#                 name_key="name",
-#                 cx="50%",
-#                 cy="50%",
-#                 padding_angle=1,
-#                 inner_radius="70",
-#                 outer_radius="100",
-#                 label=True,
-#             ),
-#             rx.recharts.legend(),
-#             height=300,
-#         ),
-#     )
-
-
-# def timeframe_select() -> rx.Component:
-#     return rx.select(
-#         ["Monthly", "Yearly"],
-#         default_value="Monthly",
-#         value=StatsState.timeframe,
-#         variant="surface",
-#         on_change=StatsState.set_timeframe,
-#     )
+def saldo_chart() -> rx.Component:
+    return rx.cond(
+        StatsState.is_loading,
+        _loading_placeholder(),
+        rx.cond(
+            StatsState.chart_data.length() == 0,
+            _empty_chart_placeholder(),
+            rx.recharts.area_chart(
+                _create_gradient("blue", "colorBlue"),
+                _custom_tooltip("blue"),
+                rx.recharts.cartesian_grid(stroke_dasharray="3 3"),
+                rx.recharts.area(
+                    name="Saldo Final",
+                    data_key="saldo",
+                    stroke=rx.color("blue", 9),
+                    fill="url(#colorBlue)",
+                    type_="monotone",
+                ),
+                rx.recharts.x_axis(data_key="date", scale="auto"),
+                rx.recharts.y_axis(tick_formatter=_Y_TICK_FORMATTER),
+                rx.recharts.legend(),
+                data=StatsState.chart_data,
+                height=300,
+            ),
+        ),
+    )

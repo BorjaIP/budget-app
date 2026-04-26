@@ -8,7 +8,7 @@ def scaling_picker() -> rx.Component:
         rx.vstack(
             rx.hstack(
                 rx.icon("ruler"),
-                rx.heading("Scaling", size="6"),
+                rx.heading("Escala", size="6"),
                 align="center",
             ),
             rx.select(

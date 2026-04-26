@@ -8,7 +8,7 @@ from ..views.radius_picker import radius_picker
 from ..views.scaling_picker import scaling_picker
 
 
-@template(route="/settings", title="Settings")
+@template(route="/settings", title="Ajustes")
 def settings() -> rx.Component:
     """The settings page.
 
@@ -17,12 +17,12 @@ def settings() -> rx.Component:
 
     """
     return rx.vstack(
-        rx.heading("Settings", size="5"),
+        rx.heading("Ajustes", size="5"),
         # Primary color picker
         rx.vstack(
             rx.hstack(
                 rx.icon("palette", color=rx.color("accent", 10)),
-                rx.heading("Primary color", size="6"),
+                rx.heading("Color principal", size="6"),
                 align="center",
             ),
             primary_color_picker(),
@@ -33,7 +33,7 @@ def settings() -> rx.Component:
         rx.vstack(
             rx.hstack(
                 rx.icon("blend", color=rx.color("gray", 11)),
-                rx.heading("Secondary color", size="6"),
+                rx.heading("Color secundario", size="6"),
                 align="center",
             ),
             secondary_color_picker(),

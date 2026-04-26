@@ -13,11 +13,8 @@ def sidebar_header() -> rx.Component:
 
     """
     return rx.hstack(
-        # The logo.
-        rx.color_mode_cond(
-            rx.image(src="/reflex_black.svg", height="1.5em"),
-            rx.image(src="/reflex_white.svg", height="1.5em"),
-        ),
+        rx.icon("wallet", size=24, color=rx.color("teal", 9)),
+        rx.heading("Mi Presupuesto", size="4", weight="bold"),
         rx.spacer(),
         align="center",
         width="100%",
@@ -34,18 +31,6 @@ def sidebar_footer() -> rx.Component:
 
     """
     return rx.hstack(
-        rx.link(
-            rx.text("Docs", size="3"),
-            href="https://reflex.dev/docs/getting-started/introduction/",
-            color_scheme="gray",
-            underline="none",
-        ),
-        rx.link(
-            rx.text("Blog", size="3"),
-            href="https://reflex.dev/blog/",
-            color_scheme="gray",
-            underline="none",
-        ),
         rx.spacer(),
         rx.color_mode.button(style={"opacity": "0.8", "scale": "0.95"}),
         justify="start",
@@ -72,18 +57,16 @@ def sidebar_item(text: str, url: str) -> rx.Component:
     """
     # Whether the item is active.
     active = (rx.State.router.page.path == url.lower()) | (
-        (rx.State.router.page.path == "/") & text == "Overview"
+        (rx.State.router.page.path == "/") & text == "Resumen"
     )
 
     return rx.link(
         rx.hstack(
             rx.match(
                 text,
-                ("Overview", sidebar_item_icon("home")),
-                ("Gastos", sidebar_item_icon("table-2")),
-                # ("About", sidebar_item_icon("book-open")),
-                # ("Profile", sidebar_item_icon("user")),
-                ("Settings", sidebar_item_icon("settings")),
+                ("Resumen", sidebar_item_icon("home")),
+                ("Gastos", sidebar_item_icon("receipt")),
+                ("Ajustes", sidebar_item_icon("settings")),
                 sidebar_item_icon("layout-dashboard"),
             ),
             rx.text(text, size="3", weight="regular"),
@@ -138,7 +121,6 @@ def sidebar() -> rx.Component:
     ordered_page_routes = [
         "/",
         "/expenses",
-        "/profile",
         "/settings",
     ]
 

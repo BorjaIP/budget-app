@@ -1,21 +1,28 @@
 import reflex as rx
 
 from dashboard.expenses.state import TableState
-from dashboard.expenses.view import TableView
+from dashboard.expenses.view import main_table
 from dashboard.templates import template
 
 
-@template(route="/expenses", title="Gastos", on_load=TableState.load_entries_from_database)  # type: ignore
+@template(route="/expenses", title="Gastos", on_load=TableState.load_entries_from_database)
 def expenses() -> rx.Component:
-    """The table page.
-
-    Returns:
-        The UI for the table page.
-    """
-    view = TableView()
     return rx.vstack(
-        rx.heading("Gastos", size="5"),
-        view.main_table(),
-        spacing="8",
+        rx.hstack(
+            rx.heading("Gastos", size="6"),
+            rx.spacer(),
+            rx.button(
+                rx.icon("sparkles", size=16),
+                "Recategorizar",
+                variant="surface",
+                size="2",
+                on_click=TableState.force_recategorize,
+            ),
+            align="center",
+            wrap="wrap",
+            width="100%",
+        ),
+        main_table(),
+        spacing="4",
         width="100%",
     )

@@ -1,32 +1,35 @@
 from datetime import datetime
 from typing import Optional
-from sqlmodel import SQLModel, Field
+
+from sqlmodel import Field, SQLModel
 
 
 class ExpenseBase(SQLModel):
-    """Base model for expense data"""
-    operation_date: str = Field(description="Date of operation")
-    value_date: str = Field(description="Value date")
+    operation_date: str = Field(description="Operation date in ISO format yyyy-mm-dd")
+    value_date: str = Field(description="Value date in ISO format yyyy-mm-dd")
     concept: str = Field(description="Transaction concept/description")
-    amount: str = Field(description="Transaction amount")
-    salary: str = Field(description="Account balance/salary")
-    category: Optional[str] = Field(default=None, description="Expense category")
+    amount: float = Field(description="Transaction amount; negative=expense, positive=income")
+    balance: float = Field(description="Account balance after the transaction")
+    category: Optional[str] = Field(default=None, index=True)
+    subcategory: Optional[str] = Field(default=None)
+    bank_name: Optional[str] = Field(default=None, index=True)
+    is_categorized: bool = Field(default=False, index=True)
 
 
 class Expense(ExpenseBase, table=True):
-    """Expense table model"""
     id: Optional[int] = Field(default=None, primary_key=True)
+    dedupe_hash: str = Field(unique=True, index=True)
     created_at: datetime = Field(default_factory=datetime.now)
-    file_source: Optional[str] = Field(default=None, description="Source file name")
+    file_source: Optional[str] = Field(default=None)
 
 
 class ExpenseCreate(ExpenseBase):
-    """Model for creating new expenses"""
+    dedupe_hash: str
     file_source: Optional[str] = None
 
 
 class ExpenseRead(ExpenseBase):
-    """Model for reading expenses"""
     id: int
+    dedupe_hash: str
     created_at: datetime
-    file_source: Optional[str] = None 
+    file_source: Optional[str] = None

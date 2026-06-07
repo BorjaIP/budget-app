@@ -5,131 +5,178 @@ import reflex as rx
 from reflex.components.radix.themes.base import LiteralAccentColor
 
 from dashboard.database.operations import db_manager
-from dashboard.utils.file_reader import FileReader
+
+
+class ConceptRow(rx.Base):
+    concept: str = ""
+    total: float = 0.0
+    total_fmt: str = ""
+    count: int = 0
+
+
+class RecentRow(rx.Base):
+    id: int = 0
+    operation_date: str = ""
+    concept: str = ""
+    amount: float = 0.0
+    amount_fmt: str = ""
+    category: str = ""
+    is_expense: bool = False
+
+
+def _format_currency(value: float) -> str:
+    """Format float as Spanish euro: 1.234,56 €."""
+    return f"{value:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
 class StatsState(rx.State):
     date_filter: str = "all"
     chart_data: list[dict] = []
+    category_breakdown: list[dict] = []
+    top_concepts: list[ConceptRow] = []
+    recent_expenses: list[RecentRow] = []
     is_loading: bool = False
 
-    def _parse_date(self, date_str: str) -> datetime | None:
-        """Parse dd/mm/yyyy date string."""
-        try:
-            return datetime.strptime(date_str.strip(), "%d/%m/%Y")
-        except (ValueError, AttributeError):
-            return None
-
-    def _get_date_range(self) -> tuple[datetime | None, datetime | None]:
-        """Compute start/end dates based on current filter."""
+    def _date_range(self) -> tuple[str | None, str | None]:
         now = datetime.now()
         if self.date_filter == "1m":
-            return now - timedelta(days=30), now
+            start = now - timedelta(days=30)
         elif self.date_filter == "6m":
-            return now - timedelta(days=180), now
+            start = now - timedelta(days=180)
         elif self.date_filter == "1y":
-            return now - timedelta(days=365), now
-        else:  # "all"
+            start = now - timedelta(days=365)
+        else:
             return None, None
+        return start.strftime("%Y-%m-%d"), now.strftime("%Y-%m-%d")
 
     @rx.event
     async def load_chart_data(self):
-        """Load expenses from DB, aggregate by date into ingresos/gastos/saldo."""
         self.is_loading = True
         try:
-            db_expenses = db_manager.get_all_expenses()
-            if not db_expenses:
-                self.chart_data = []
-                return
+            date_from, date_to = self._date_range()
+            expenses = db_manager.get_all_expenses()
 
-            file_reader = FileReader()
-            date_start, date_end = self._get_date_range()
-
-            # Parse and filter records
-            parsed: list[tuple[datetime, float, float]] = []
-            for exp in db_expenses:
-                dt = self._parse_date(exp.operation_date)
-                if dt is None:
-                    continue
-                if date_start and dt < date_start:
-                    continue
-                if date_end and dt > date_end:
-                    continue
-                amount = file_reader.convert_european_number_to_float(exp.amount)
-                salary = file_reader.convert_european_number_to_float(exp.salary)
-                parsed.append((dt, amount, salary))
-
-            if not parsed:
-                self.chart_data = []
-                return
-
-            # Aggregate by date
             ingresos: dict[str, float] = defaultdict(float)
             gastos: dict[str, float] = defaultdict(float)
             saldo: dict[str, float] = {}
 
-            for dt, amount, salary in parsed:
-                key = dt.strftime("%d/%m/%Y")
-                if amount > 0:
-                    ingresos[key] += amount
+            for expense in expenses:
+                op_date = expense.operation_date
+                if date_from and op_date < date_from:
+                    continue
+                if date_to and op_date > date_to:
+                    continue
+                if expense.amount > 0:
+                    ingresos[op_date] += expense.amount
                 else:
-                    gastos[key] += abs(amount)
-                # Keep last saldo for each date
-                saldo[key] = salary
+                    gastos[op_date] += abs(expense.amount)
+                saldo[op_date] = expense.balance
 
-            # Build sorted result
-            all_dates = set(ingresos.keys()) | set(gastos.keys()) | set(saldo.keys())
-            result = []
-            for date_str in all_dates:
-                dt = datetime.strptime(date_str, "%d/%m/%Y")
-                result.append({
-                    "date": date_str,
-                    "_sort": dt.timestamp(),
-                    "ingresos": round(ingresos.get(date_str, 0), 2),
-                    "gastos": round(gastos.get(date_str, 0), 2),
-                    "saldo": round(saldo.get(date_str, 0), 2),
-                })
+            all_dates = sorted(set(ingresos) | set(gastos) | set(saldo))
+            self.chart_data = [
+                {
+                    "date": _humanize(d),
+                    "ingresos": round(ingresos.get(d, 0.0), 2),
+                    "gastos": round(gastos.get(d, 0.0), 2),
+                    "saldo": round(saldo.get(d, 0.0), 2),
+                }
+                for d in all_dates
+            ]
 
-            result.sort(key=lambda r: r["_sort"])
-            # Remove sort key before sending to frontend
-            for r in result:
-                del r["_sort"]
-
-            self.chart_data = result
-        except Exception as e:
-            print(f"Error loading chart data: {e}")
+            self.category_breakdown = [
+                {
+                    "name": row["name"],
+                    "value": row["value"],
+                    "value_fmt": _format_currency(row["value"]),
+                }
+                for row in db_manager.get_category_breakdown(
+                    date_from=date_from, date_to=date_to
+                )
+            ]
+            self.top_concepts = [
+                ConceptRow(
+                    concept=row["concept"],
+                    total=row["total"],
+                    total_fmt=_format_currency(row["total"]),
+                    count=row["count"],
+                )
+                for row in db_manager.get_top_concepts(
+                    limit=8, date_from=date_from, date_to=date_to
+                )
+            ]
+            self.recent_expenses = [
+                RecentRow(
+                    id=e.id or 0,
+                    operation_date=_humanize(e.operation_date),
+                    concept=e.concept,
+                    amount=e.amount,
+                    amount_fmt=_format_currency(e.amount),
+                    category=e.category or "Sin categorizar",
+                    is_expense=e.amount < 0,
+                )
+                for e in db_manager.get_recent_expenses(limit=8)
+            ]
+        except Exception as exc:
+            print(f"Error loading chart data: {exc}")
             self.chart_data = []
+            self.category_breakdown = []
+            self.top_concepts = []
+            self.recent_expenses = []
         finally:
             self.is_loading = False
 
     @rx.var(cache=True)
+    def total_ingresos(self) -> float:
+        return sum(d.get("ingresos", 0) for d in self.chart_data)
+
+    @rx.var(cache=True)
+    def total_gastos(self) -> float:
+        return sum(d.get("gastos", 0) for d in self.chart_data)
+
+    @rx.var(cache=True)
     def total_ingresos_fmt(self) -> str:
-        total = sum(d.get("ingresos", 0) for d in self.chart_data)
-        return f"{total:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
+        return _format_currency(self.total_ingresos)
 
     @rx.var(cache=True)
     def total_gastos_fmt(self) -> str:
-        total = sum(d.get("gastos", 0) for d in self.chart_data)
-        return f"{total:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
+        return _format_currency(self.total_gastos)
 
     @rx.var(cache=True)
     def saldo_neto_fmt(self) -> str:
         if not self.chart_data:
-            return "0,00 €"
-        last = self.chart_data[-1].get("saldo", 0)
-        return f"{last:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
+            return _format_currency(0.0)
+        return _format_currency(self.chart_data[-1].get("saldo", 0))
+
+    @rx.var(cache=True)
+    def savings_rate_fmt(self) -> str:
+        if self.total_ingresos <= 0:
+            return "—"
+        rate = (self.total_ingresos - self.total_gastos) / self.total_ingresos * 100
+        return f"{rate:.1f}%"
+
+    @rx.var(cache=True)
+    def savings_rate_color(self) -> str:
+        if self.total_ingresos <= 0:
+            return "gray"
+        rate = (self.total_ingresos - self.total_gastos) / self.total_ingresos * 100
+        if rate >= 20:
+            return "green"
+        if rate > 0:
+            return "amber"
+        return "red"
 
     @rx.event
     async def set_date_preset(self, value: str | list[str]):
-        """Set a date filter preset and reload data."""
         self.date_filter = value if isinstance(value, str) else value[0]
         await self.load_chart_data()
 
 
+def _humanize(iso_date: str) -> str:
+    try:
+        return datetime.strptime(iso_date, "%Y-%m-%d").strftime("%d/%m/%Y")
+    except (ValueError, TypeError):
+        return iso_date
 
-# ---------------------------------------------------------------------------
-# Reusable chart helpers
-# ---------------------------------------------------------------------------
 
 _Y_TICK_FORMATTER = rx.Var(
     "(value) => {"
@@ -140,14 +187,13 @@ _Y_TICK_FORMATTER = rx.Var(
 )
 
 
-def _create_gradient(color: LiteralAccentColor, id: str):
-    """Create a gradient for area charts."""
+def _create_gradient(color: LiteralAccentColor, gradient_id: str):
     return rx.el.svg.defs(
         rx.el.svg.linear_gradient(
             rx.el.svg.stop(stop_color=rx.color(color, 7), offset="5%", stop_opacity=0.8),
             rx.el.svg.stop(stop_color=rx.color(color, 7), offset="95%", stop_opacity=0),
             x1=0, x2=0, y1=0, y2=1,
-            id=id,
+            id=gradient_id,
         ),
     )
 
@@ -171,7 +217,7 @@ def _empty_chart_placeholder() -> rx.Component:
     return rx.center(
         rx.vstack(
             rx.icon("chart-no-axes-combined", size=32, color="gray"),
-            rx.text("No hay datos disponibles", size="4", weight="medium"),
+            rx.text("No hay datos para el periodo seleccionado", size="3", weight="medium"),
             spacing="3",
             align="center",
         ),
@@ -191,17 +237,13 @@ def _loading_placeholder() -> rx.Component:
     )
 
 
-# ---------------------------------------------------------------------------
-# Date filter controls
-# ---------------------------------------------------------------------------
-
 def date_filter_controls() -> rx.Component:
     return rx.hstack(
         rx.segmented_control.root(
             rx.segmented_control.item("Todo", value="all"),
-            rx.segmented_control.item("1 Mes", value="1m"),
-            rx.segmented_control.item("6 Meses", value="6m"),
-            rx.segmented_control.item("1 Ano", value="1y"),
+            rx.segmented_control.item("1 mes", value="1m"),
+            rx.segmented_control.item("6 meses", value="6m"),
+            rx.segmented_control.item("1 año", value="1y"),
             value=StatsState.date_filter,
             on_change=StatsState.set_date_preset,
         ),
@@ -211,64 +253,7 @@ def date_filter_controls() -> rx.Component:
     )
 
 
-# ---------------------------------------------------------------------------
-# Three chart components
-# ---------------------------------------------------------------------------
-
-def ingresos_chart() -> rx.Component:
-    return rx.cond(
-        StatsState.is_loading,
-        _loading_placeholder(),
-        rx.cond(
-            StatsState.chart_data.length() == 0,
-            _empty_chart_placeholder(),
-            rx.recharts.line_chart(
-                _custom_tooltip("green"),
-                rx.recharts.cartesian_grid(stroke_dasharray="3 3"),
-                rx.recharts.line(
-                    name="Ingresos",
-                    data_key="ingresos",
-                    stroke=rx.color("green", 9),
-                    type_="monotone",
-                ),
-                rx.recharts.x_axis(data_key="date", scale="auto"),
-                rx.recharts.y_axis(tick_formatter=_Y_TICK_FORMATTER),
-                rx.recharts.legend(),
-                data=StatsState.chart_data,
-                height=300,
-            ),
-        ),
-    )
-
-
-def gastos_chart() -> rx.Component:
-    return rx.cond(
-        StatsState.is_loading,
-        _loading_placeholder(),
-        rx.cond(
-            StatsState.chart_data.length() == 0,
-            _empty_chart_placeholder(),
-            rx.recharts.line_chart(
-                _custom_tooltip("red"),
-                rx.recharts.cartesian_grid(stroke_dasharray="3 3"),
-                rx.recharts.line(
-                    name="Gastos",
-                    data_key="gastos",
-                    stroke=rx.color("red", 9),
-                    type_="monotone",
-                ),
-                rx.recharts.x_axis(data_key="date", scale="auto"),
-                rx.recharts.y_axis(tick_formatter=_Y_TICK_FORMATTER),
-                rx.recharts.legend(),
-                data=StatsState.chart_data,
-                height=300,
-            ),
-        ),
-    )
-
-
 def ingresos_gastos_chart() -> rx.Component:
-    """Combined bar chart with Ingresos (green) and Gastos (red) side by side."""
     return rx.cond(
         StatsState.is_loading,
         _loading_placeholder(),
@@ -310,7 +295,7 @@ def saldo_chart() -> rx.Component:
                 _custom_tooltip("blue"),
                 rx.recharts.cartesian_grid(stroke_dasharray="3 3"),
                 rx.recharts.area(
-                    name="Saldo Final",
+                    name="Saldo",
                     data_key="saldo",
                     stroke=rx.color("blue", 9),
                     fill="url(#colorBlue)",

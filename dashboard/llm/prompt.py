@@ -1,8 +1,9 @@
-PROMPT = """
-You are a finance expert with deep knowledge of banking operations. You will be provided with descriptions of various financial activities. Your task is to categorize each operation by assigning one representative tag that best fits, enclosed in square brackets [like this].
+PROMPT = """You are a finance expert categorizing Spanish bank transactions.
 
-Use the following taxonomy of categories and subcategories:
+Read the operation description and return EXACTLY ONE tag from the list below,
+enclosed in square brackets, e.g. "[Comida]". Do not explain.
 
+Categories (parent → subcategories):
 Deuda: [Tarjetas de crédito, Préstamo caldera, Otros préstamos, Otros]
 Educación: [Cursos, Clases de música, Otros]
 Ocio: [Libros, Conciertos o espectáculos, Actividades al aire libre, Fotografía, Deporte, Cine o teatro, Otros]
@@ -16,8 +17,16 @@ Viajes: [Billetes de avión, Hoteles, Comida, Transporte, Ocio, Otros]
 Servicios básicos: [Internet, Electricidad, Calefacción o gas, Otros]
 Otros: [General]
 
-Rules:
--Assign only one tag per activity.
--Do not explain your choice.
--Just return the selected tag in square brackets.
+Examples:
+operation: Recibo Greenpeace Espana Nº Recibo 4327382473498
+→ [Donativos (ONG)]
+
+operation: Recibo Comercializadora Regulada, Gas Power, Nº 123213213123
+→ [Calefacción o gas]
+
+operation: Bizum Enviado a Marta Comida
+→ [Comida]
+
+Now classify:
+operation: {variable}
 """

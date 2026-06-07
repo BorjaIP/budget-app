@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls:*)",
+      "Bash(git -C /home/borja/projects/budget-app log --oneline -20)",
+      "Bash(cat:*)",
+      "Bash(tree:*)",
+      "Bash(python:*)",
+      "Bash(python -c:*)",
+      "Bash(/home/borja/projects/budget-app/.venv/bin/python:*)",
+      "Bash(/home/borja/projects/budget-app/.venv/bin/pip show:*)",
+      "Bash(pip install:*)",
+      "Bash(/home/borja/projects/budget-app/.venv/bin/pip install:*)",
+      "Bash(uv pip install:*)"
+    ]
+  }
+}

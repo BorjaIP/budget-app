@@ -4,11 +4,19 @@ import reflex as rx
 
 
 class Item(rx.Base):
-    """The item class."""
+    """UI representation of an expense row."""
 
-    operation_date: str
-    value_date: str
-    concept: str
-    amount: str
-    salary: str
+    id: int = 0
+    operation_date: str = ""
+    operation_date_human: str = ""
+    value_date: str = ""
+    concept: str = ""
+    amount: float = 0.0
+    amount_fmt: str = ""
+    balance: float = 0.0
+    balance_fmt: str = ""
+    is_expense: bool = False
     category: Optional[str] = None
+    subcategory: Optional[str] = None
+    bank_name: Optional[str] = None
+    is_categorized: bool = False

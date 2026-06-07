@@ -1,21 +1,21 @@
-"""Sidebar component for the app."""
+"""Desktop persistent sidebar with logo and primary navigation."""
 
 import reflex as rx
 
 from .. import styles
 
 
-def sidebar_header() -> rx.Component:
-    """Sidebar header.
+_ITEMS = [
+    ("/", "Resumen", "home"),
+    ("/expenses", "Gastos", "receipt"),
+    ("/settings", "Ajustes", "settings"),
+]
 
-    Returns:
-        The sidebar header component.
 
-    """
+def _header() -> rx.Component:
     return rx.hstack(
         rx.icon("wallet", size=24, color=rx.color("teal", 9)),
         rx.heading("Mi Presupuesto", size="4", weight="bold"),
-        rx.spacer(),
         align="center",
         width="100%",
         padding="0.35em",
@@ -23,150 +23,65 @@ def sidebar_header() -> rx.Component:
     )
 
 
-def sidebar_footer() -> rx.Component:
-    """Sidebar footer.
-
-    Returns:
-        The sidebar footer component.
-
-    """
+def _footer() -> rx.Component:
     return rx.hstack(
-        rx.spacer(),
         rx.color_mode.button(style={"opacity": "0.8", "scale": "0.95"}),
-        justify="start",
+        rx.spacer(),
         align="center",
         width="100%",
         padding="0.35em",
     )
 
 
-def sidebar_item_icon(icon: str) -> rx.Component:
-    return rx.icon(icon, size=18)
-
-
-def sidebar_item(text: str, url: str) -> rx.Component:
-    """Sidebar item.
-
-    Args:
-        text: The text of the item.
-        url: The URL of the item.
-
-    Returns:
-        rx.Component: The sidebar item component.
-
-    """
-    # Whether the item is active.
-    active = (rx.State.router.page.path == url.lower()) | (
-        (rx.State.router.page.path == "/") & text == "Resumen"
-    )
-
+def _item(href: str, label: str, icon: str) -> rx.Component:
+    active = rx.State.router.page.path == href
     return rx.link(
         rx.hstack(
-            rx.match(
-                text,
-                ("Resumen", sidebar_item_icon("home")),
-                ("Gastos", sidebar_item_icon("receipt")),
-                ("Ajustes", sidebar_item_icon("settings")),
-                sidebar_item_icon("layout-dashboard"),
-            ),
-            rx.text(text, size="3", weight="regular"),
-            color=rx.cond(
-                active,
-                styles.accent_text_color,
-                styles.text_color,
-            ),
+            rx.icon(icon, size=18),
+            rx.text(label, size="3", weight="medium"),
+            color=rx.cond(active, styles.accent_text_color, styles.text_color),
+            background_color=rx.cond(active, styles.accent_bg_color, "transparent"),
             style={
                 "_hover": {
                     "background_color": rx.cond(
-                        active,
-                        styles.accent_bg_color,
-                        styles.gray_bg_color,
+                        active, styles.accent_bg_color, styles.gray_bg_color
                     ),
-                    "color": rx.cond(
-                        active,
-                        styles.accent_text_color,
-                        styles.text_color,
-                    ),
-                    "opacity": "1",
                 },
-                "opacity": rx.cond(
-                    active,
-                    "1",
-                    "0.95",
-                ),
             },
             align="center",
             border_radius=styles.border_radius,
             width="100%",
             spacing="2",
-            padding="0.35em",
+            padding="0.5em 0.6em",
         ),
         underline="none",
-        href=url,
+        href=href,
         width="100%",
     )
 
 
 def sidebar() -> rx.Component:
-    """The sidebar.
-
-    Returns:
-        The sidebar component.
-
-    """
-    # Get all the decorated pages and add them to the sidebar.
-    from reflex.page import get_decorated_pages
-
-    # The ordered page routes.
-    ordered_page_routes = [
-        "/",
-        "/expenses",
-        "/settings",
-    ]
-
-    # Get the decorated pages.
-    pages = get_decorated_pages()
-
-    # Include all pages even if they are not in the ordered_page_routes.
-    ordered_pages = sorted(
-        pages,
-        key=lambda page: (
-            ordered_page_routes.index(page["route"])
-            if page["route"] in ordered_page_routes
-            else len(ordered_page_routes)
-        ),
-    )
-
     return rx.flex(
         rx.vstack(
-            sidebar_header(),
+            _header(),
             rx.vstack(
-                *[
-                    sidebar_item(
-                        text=page.get("title", page["route"].strip("/").capitalize()),
-                        url=page["route"],
-                    )
-                    for page in ordered_pages
-                ],
+                *[_item(href, label, icon) for href, label, icon in _ITEMS],
                 spacing="1",
                 width="100%",
             ),
             rx.spacer(),
-            sidebar_footer(),
-            justify="end",
-            align="end",
+            _footer(),
             width=styles.sidebar_content_width,
             height="100dvh",
             padding="1em",
         ),
-        display=["none", "none", "none", "none", "none", "flex"],
+        display=["none", "none", "flex", "flex", "flex"],
         max_width=styles.sidebar_width,
         width="auto",
         height="100%",
         position="sticky",
-        justify="end",
         top="0px",
-        left="0px",
-        flex="1",
-        bg=rx.color("gray", 2),
+        flex="0 0 auto",
+        background_color=rx.color("gray", 2),
+        border_right=styles.border,
     )

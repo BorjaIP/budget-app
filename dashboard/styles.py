@@ -26,7 +26,7 @@ template_page_style = {
 
 template_content_style = {
     "padding": "1em",
-    "margin_bottom": "2em",
+    "padding_bottom": ["6em", "6em", "2em"],  # leave room for mobile bottom nav
     "min_height": "90vh",
 }
 
@@ -51,17 +51,6 @@ markdown_style = {
         text_decoration="underline",
         text_decoration_color=accent_text_color,
     ),
-}
-
-notification_badge_style = {
-    "width": "1.25rem",
-    "height": "1.25rem",
-    "display": "flex",
-    "align_items": "center",
-    "justify_content": "center",
-    "position": "absolute",
-    "right": "-0.35rem",
-    "top": "-0.35rem",
 }
 
 ghost_input_style = {

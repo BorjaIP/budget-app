@@ -5,13 +5,13 @@ from __future__ import annotations
 from typing import Callable
 
 import reflex as rx
-from reflex.event import EventType
 
 from .. import styles
+from ..components.bottom_nav import bottom_nav
 from ..components.navbar import navbar
 from ..components.sidebar import sidebar
 
-# Meta tags for the app.
+
 default_meta = [
     {
         "name": "viewport",
@@ -20,24 +20,7 @@ default_meta = [
 ]
 
 
-def menu_item_link(text, href):
-    return rx.menu.item(
-        rx.link(
-            text,
-            href=href,
-            width="100%",
-            color="inherit",
-        ),
-        _hover={
-            "color": styles.accent_color,
-            "background_color": styles.accent_text_color,
-        },
-    )
-
-
 class ThemeState(rx.State):
-    """The state for the theme of the app."""
-
     accent_color: str = "teal"
     gray_color: str = "gray"
     radius: str = "large"
@@ -48,47 +31,25 @@ def template(
     route: str | None = None,
     title: str | None = None,
     description: str | None = None,
-    meta: str | None = None,
+    meta: list | None = None,
     script_tags: list[rx.Component] | None = None,
     on_load: rx.EventHandler | list[rx.EventHandler] | None = None,
 ) -> Callable[[Callable[[], rx.Component]], rx.Component]:
-    """The template for each page of the app.
-
-    Args:
-        route: The route to reach the page.
-        title: The title of the page.
-        description: The description of the page.
-        meta: Additional meta to add to the page.
-        script_tags: Scripts to attach to the page.
-        on_load: The event handler(s) called when the page load.
-
-    Returns:
-        The template with the page content.
-
-    """
-
     def decorator(page_content: Callable[[], rx.Component]) -> rx.Component:
-        """The template for each page of the app.
-
-        Args:
-            page_content: The content of the page.
-
-        Returns:
-            The template with the page content.
-        """
-        # Get the meta tags for the page.
         all_meta = [*default_meta, *(meta or [])]
 
-        def templated_page():
+        def templated_page() -> rx.Component:
             return rx.flex(
-                navbar(),
                 sidebar(),
                 rx.flex(
+                    navbar(),
                     rx.vstack(
                         page_content(),
                         width="100%",
                         **styles.template_content_style,
                     ),
+                    bottom_nav(),
+                    direction="column",
                     width="100%",
                     **styles.template_page_style,
                     max_width=[
@@ -100,14 +61,7 @@ def template(
                         styles.max_width,
                     ],
                 ),
-                flex_direction=[
-                    "column",
-                    "column",
-                    "column",
-                    "column",
-                    "column",
-                    "row",
-                ],
+                flex_direction=["column", "column", "row", "row", "row"],
                 width="100%",
                 margin="auto",
                 position="relative",
@@ -125,10 +79,10 @@ def template(
             return rx.theme(
                 templated_page(),
                 has_background=True,
-                accent_color=ThemeState.accent_color,  # type: ignore
-                gray_color=ThemeState.gray_color,  # type: ignore
-                radius=ThemeState.radius,  # type: ignore
-                scaling=ThemeState.scaling,  # type: ignore
+                accent_color=ThemeState.accent_color,
+                gray_color=ThemeState.gray_color,
+                radius=ThemeState.radius,
+                scaling=ThemeState.scaling,
             )
 
         return theme_wrap

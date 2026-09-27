@@ -2,7 +2,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlmodel import Session, SQLModel, asc, create_engine, desc, select
 
 from .models import Expense, ExpenseCreate
@@ -24,9 +24,30 @@ class DatabaseManager:
         Path(db_path).parent.mkdir(exist_ok=True)
         self.engine = create_engine(f"sqlite:///{db_path}")
         self.create_tables()
+        self._migrate_schema()
 
     def create_tables(self) -> None:
         SQLModel.metadata.create_all(self.engine)
+
+    def _migrate_schema(self) -> None:
+        """Guarded, additive migration for existing SQLite databases.
+
+        `SQLModel.metadata.create_all()` only creates missing tables; it does
+        not add new columns to a table that already exists. This repo has no
+        Alembic, so add any newly-introduced columns here defensively.
+        """
+        table_name = Expense.__tablename__
+        with self.engine.connect() as conn:
+            existing_columns = {
+                row[1] for row in conn.execute(text(f"PRAGMA table_info({table_name})")).fetchall()
+            }
+            if not existing_columns:
+                # Table doesn't exist yet (fresh DB) - create_tables() above
+                # already handles that case; nothing to migrate.
+                return
+            if "category_source" not in existing_columns:
+                conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN category_source TEXT"))
+                conn.commit()
 
     def get_session(self) -> Session:
         return Session(self.engine)
@@ -141,7 +162,11 @@ class DatabaseManager:
             return list(session.exec(statement).all())
 
     def update_category(
-        self, expense_id: int, category: str | None, subcategory: str | None = None
+        self,
+        expense_id: int,
+        category: str | None,
+        subcategory: str | None = None,
+        source: str = "manual",
     ) -> bool:
         with self.get_session() as session:
             expense = session.get(Expense, expense_id)
@@ -150,9 +175,30 @@ class DatabaseManager:
             expense.category = category
             expense.subcategory = subcategory
             expense.is_categorized = True
+            expense.category_source = source
             session.add(expense)
             session.commit()
             return True
+
+    def get_manually_tagged_examples(self, limit: int = 8) -> list[dict[str, Any]]:
+        """Recent user-corrected rows, for the LLM few-shot prompt builder."""
+        with self.get_session() as session:
+            statement = (
+                select(Expense)
+                .where(Expense.category_source == "manual")
+                .where(Expense.category.is_not(None))  # type: ignore[union-attr]
+                .order_by(desc(Expense.id))
+                .limit(max(limit * 4, limit))
+            )
+            rows = session.exec(statement).all()
+            return [
+                {
+                    "concept": row.concept,
+                    "category": row.category,
+                    "subcategory": row.subcategory,
+                }
+                for row in rows
+            ]
 
     def reset_categorization(self) -> int:
         """Mark every row as not categorized (forces full re-run)."""
@@ -245,6 +291,51 @@ class DatabaseManager:
                 {"concept": name, "total": round(total, 2), "count": counts[name]}
                 for name, total in ordered
             ]
+
+    def get_date_bounds(self) -> tuple[str | None, str | None]:
+        """Return (earliest, latest) operation_date across all expenses."""
+        with self.get_session() as session:
+            dates = session.exec(select(Expense.operation_date)).all()
+        if not dates:
+            return None, None
+        return min(dates), max(dates)
+
+    def get_available_years(self) -> list[str]:
+        """Distinct calendar years present in the data, newest first."""
+        with self.get_session() as session:
+            dates = session.exec(select(Expense.operation_date)).all()
+        years = {d[:4] for d in dates if d}
+        return sorted(years, reverse=True)
+
+    def get_yearly_summary(self) -> list[dict[str, Any]]:
+        """Aggregate ingresos/gastos/ahorro per calendar year."""
+        with self.get_session() as session:
+            rows = session.exec(select(Expense)).all()
+
+        totals: dict[str, dict[str, float]] = defaultdict(lambda: {"ingresos": 0.0, "gastos": 0.0})
+        for row in rows:
+            year = row.operation_date[:4]
+            if row.amount > 0:
+                totals[year]["ingresos"] += row.amount
+            else:
+                totals[year]["gastos"] += abs(row.amount)
+
+        result = []
+        for year in sorted(totals.keys()):
+            ingresos = totals[year]["ingresos"]
+            gastos = totals[year]["gastos"]
+            ahorro = ingresos - gastos
+            rate = (ahorro / ingresos * 100) if ingresos > 0 else 0.0
+            result.append(
+                {
+                    "year": year,
+                    "ingresos": round(ingresos, 2),
+                    "gastos": round(gastos, 2),
+                    "ahorro": round(ahorro, 2),
+                    "savings_rate": round(rate, 1),
+                }
+            )
+        return result
 
     def get_recent_expenses(self, limit: int = 8) -> list[Expense]:
         with self.get_session() as session:

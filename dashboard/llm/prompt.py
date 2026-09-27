@@ -1,7 +1,19 @@
+STATIC_EXAMPLES = """Examples:
+operation: Recibo Greenpeace Espana Nº Recibo 4327382473498
+→ [Regalos][Donativos (ONG)]
+
+operation: Recibo Comercializadora Regulada, Gas Power, Nº 123213213123
+→ [Servicios básicos][Calefacción o gas]
+
+operation: Bizum Enviado a Marta Comida
+→ [Gastos diarios][Comida]"""
+
+
 PROMPT = """You are a finance expert categorizing Spanish bank transactions.
 
-Read the operation description and return EXACTLY ONE tag from the list below,
-enclosed in square brackets, e.g. "[Comida]". Do not explain.
+Read the operation description and return EXACTLY TWO tags from the list
+below, enclosed in square brackets and in this order: the parent category
+first, then the subcategory, e.g. "[Comida][Restaurantes]". Do not explain.
 
 Categories (parent → subcategories):
 Deuda: [Tarjetas de crédito, Préstamo caldera, Otros préstamos, Otros]
@@ -17,15 +29,7 @@ Viajes: [Billetes de avión, Hoteles, Comida, Transporte, Ocio, Otros]
 Servicios básicos: [Internet, Electricidad, Calefacción o gas, Otros]
 Otros: [General]
 
-Examples:
-operation: Recibo Greenpeace Espana Nº Recibo 4327382473498
-→ [Donativos (ONG)]
-
-operation: Recibo Comercializadora Regulada, Gas Power, Nº 123213213123
-→ [Calefacción o gas]
-
-operation: Bizum Enviado a Marta Comida
-→ [Comida]
+{examples}
 
 Now classify:
 operation: {variable}

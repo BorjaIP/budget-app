@@ -97,6 +97,42 @@ match first.
 
 Verified in this sandbox:
 - `uv run pytest tests/ -q` → 13 passed.
+
+### Orchestrator verification pass (after delegated commit `0e60c1a`)
+
+Independently re-verified the diff and found + fixed two gaps before accepting the work:
+
+1. **Data loss on container recreation**: the `app` service had no volume for
+   `expenses.db` — SQLite would live inside the ephemeral container layer.
+   Added a bind mount `../expenses.db:/app/expenses.db` in
+   `docker/docker-compose.yaml` so the same file is shared with local
+   `make up` runs and survives rebuilds. Confirmed the host file already
+   exists, so Docker won't create it as a directory.
+2. **Missing `.dockerignore`**: added one (excludes `.venv/`, `.git/`, `.web/`,
+   `expenses.db`, `.env`, `tests/`, etc.) to keep the build context small and
+   avoid ever accidentally shipping secrets/data via a future COPY change.
+3. **Real correctness bug in `reset_categorization`** (used by the
+   "Recategorizar" button via `force_recategorize`): it reset **every** row
+   unconditionally, including ones with `category_source="manual"` — so every
+   click would let the LLM overwrite the user's own hand-tagged ground truth
+   and flip its source back to `"llm"`, permanently shrinking the few-shot
+   pool the whole feature depends on. Fixed to exclude `category_source ==
+   "manual"` rows from the reset. Also caught and fixed a subtler bug in the
+   fix itself: a plain `!= "manual"` SQL comparison excludes `NULL` rows too
+   (SQL's `NULL != 'manual'` evaluates to `NULL`, not true) — every row
+   categorized before this migration has `category_source IS NULL`, so the
+   naive fix would have silently stopped resetting all pre-existing data.
+   Used `or_(category_source.is_(None), category_source != "manual")`
+   instead. Verified against the real local DB: 492 rows, all correctly
+   included by `reset_categorization()` after the fix (0 have
+   `category_source="manual"` yet, as expected — this is a brand new field).
+4. Re-ran `uv run pytest tests/ -q` (13 passed) and
+   `docker compose -f docker/docker-compose.yaml --env-file .env config`
+   (valid; confirmed the bind mount resolves to the correct absolute host
+   path) after these fixes.
+
+T8 (Docker build, real Ollama pull, live UI click) remains unverified in this
+sandbox — left for the user.
 - `uv run python -c "from dashboard.llm import llm_call; ..."` → imports OK,
   including a live run of the new schema migration against the real
   `expenses.db`.

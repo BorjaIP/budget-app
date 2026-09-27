@@ -2,7 +2,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import func, text
+from sqlalchemy import func, or_, text
 from sqlmodel import Session, SQLModel, asc, create_engine, desc, select
 
 from .models import Expense, ExpenseCreate
@@ -201,9 +201,20 @@ class DatabaseManager:
             ]
 
     def reset_categorization(self) -> int:
-        """Mark every row as not categorized (forces full re-run)."""
+        """Mark LLM-assigned/uncategorized rows as not categorized, to force
+        a full re-run. Rows the user tagged by hand (category_source ==
+        "manual") are preserved as-is — they are the ground truth the
+        few-shot prompt builder relies on, and recategorizing would overwrite
+        them with the LLM's own guess.
+        """
         with self.get_session() as session:
-            rows = list(session.exec(select(Expense)).all())
+            # Plain `!= "manual"` would silently exclude rows where
+            # category_source IS NULL (SQL's NULL != 'manual' is NULL, not
+            # true) — that's every row categorized before this field existed.
+            statement = select(Expense).where(
+                or_(Expense.category_source.is_(None), Expense.category_source != "manual")  # type: ignore[union-attr]
+            )
+            rows = list(session.exec(statement).all())
             for row in rows:
                 row.is_categorized = False
             session.add_all(rows)

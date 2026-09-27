@@ -83,3 +83,9 @@ services:
     ports:
       - "3000:3000"
       - "8000:8000"
+    volumes:
+      # Bind-mount so the same expenses.db is shared with local `make up` runs
+      # and survives container rebuilds. The file must exist on the host
+      # first (`touch ../expenses.db`), otherwise Docker creates it as a
+      # directory instead of a file.
+      - ../expenses.db:/app/expenses.db

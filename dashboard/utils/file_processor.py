@@ -11,9 +11,9 @@ from .file_reader import FileReader
 class FileProcessor:
     """Process uploaded Excel files: parse, dedupe-by-hash, insert."""
 
-    def __init__(self, temp_folder: str = "temp_uploads"):
+    def __init__(self, temp_folder: str = "data/temp_uploads"):
         self.temp_folder = Path(temp_folder)
-        self.temp_folder.mkdir(exist_ok=True)
+        self.temp_folder.mkdir(parents=True, exist_ok=True)
         self.file_reader = FileReader()
 
     def save_uploaded_file(self, data: bytes, filename: str) -> str:

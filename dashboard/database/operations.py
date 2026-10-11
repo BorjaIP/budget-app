@@ -19,9 +19,9 @@ SORTABLE_COLUMNS = {
 
 
 class DatabaseManager:
-    def __init__(self, db_path: str = "expenses.db"):
+    def __init__(self, db_path: str = "data/expenses.db"):
         self.db_path = db_path
-        Path(db_path).parent.mkdir(exist_ok=True)
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self.engine = create_engine(f"sqlite:///{db_path}")
         self.create_tables()
         self._migrate_schema()

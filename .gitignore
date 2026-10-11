@@ -204,3 +204,10 @@ cython_debug/
 *.xlsx
 *.csv
 assets/external/
+
+# gentle-ai artifacts
+.atl/
+odd/
+
+# Personal bank data: never commit
+data/

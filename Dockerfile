@@ -4,7 +4,7 @@ FROM python:3.12-slim
 # bootstrap happens the same way it would on a local dev machine).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl ca-certificates unzip \
-    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
@@ -15,8 +15,9 @@ WORKDIR /app
 
 COPY pyproject.toml uv.lock rxconfig.py ./
 COPY dashboard/ ./dashboard/
+COPY assets/ ./assets/
 
-RUN uv sync --frozen
+RUN uv sync --frozen --no-dev
 
 # Let reflex bootstrap its own frontend deps (bun cache, node modules) on
 # first run, same as local dev — simplest path that actually works for a

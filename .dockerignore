@@ -1,12 +1,22 @@
 .venv/
 .git/
 .web/
-__pycache__/
-*.pyc
+.states/
+**/__pycache__/
+**/*.pyc
 node_modules/
-expenses.db
 .env
 odd/
 .atl/
 .claude/
 tests/
+data/
+
+# Personal financial data: never send to the build context.
+**/*.db
+**/*.db.*
+**/*.xls
+**/*.xlsx
+**/*.csv
+uploaded_files/
+temp_uploads/

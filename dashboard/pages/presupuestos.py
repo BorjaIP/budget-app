@@ -4,7 +4,7 @@ import logging
 
 import reflex as rx
 
-from ..budgets import BudgetRow, build_rows, parse_limit
+from ..budgets import BudgetRow, _money, build_rows, parse_limit
 from ..components.card import card
 from ..components.empty_state import empty_state
 from ..components.notice import error_notice
@@ -12,6 +12,7 @@ from ..components.page_header import page_header
 from ..database.operations import db_manager
 from ..llm.llm_call import CATEGORY_TAXONOMY
 from ..periods import resolve_period
+from ..recurring import RecurringRow, find_recurring
 from ..templates import template
 from ..views.charts import _humanize_month
 
@@ -20,6 +21,8 @@ logger = logging.getLogger(__name__)
 
 class BudgetState(rx.State):
     rows: list[BudgetRow] = []
+    recurring: list[RecurringRow] = []
+    recurring_total_fmt: str = ""
     month_label: str = ""
     has_data: bool = False
     load_error: bool = False
@@ -40,6 +43,8 @@ class BudgetState(rx.State):
                 row["name"]: row["value"]
                 for row in db_manager.get_category_breakdown(period.date_from, period.date_to)
             }
+            self.recurring = find_recurring(db_manager.get_all_expenses())
+            self.recurring_total_fmt = _money(sum(r.amount for r in self.recurring))
             self.rows = build_rows(list(CATEGORY_TAXONOMY), db_manager.get_budgets(), spending)
         except Exception:
             logger.exception("Could not load the budgets")
@@ -126,6 +131,49 @@ def _row(row: BudgetRow) -> rx.Component:
     )
 
 
+def _recurring_row(row: RecurringRow) -> rx.Component:
+    return rx.table.row(
+        rx.table.row_header_cell(row.concept),
+        rx.table.cell(rx.text(row.months, class_name="num"), justify="end"),
+        rx.table.cell(rx.text(row.last_date_fmt, class_name="num"), justify="end"),
+        rx.table.cell(rx.text(row.amount_fmt, weight="medium", class_name="num"), justify="end"),
+    )
+
+
+def _recurring_card() -> rx.Component:
+    return rx.cond(
+        BudgetState.recurring.length() > 0,
+        card(
+            rx.text(
+                "Unos " + BudgetState.recurring_total_fmt + " al mes en cargos que se repiten.",
+                size="2",
+                color=rx.color("gray", 11),
+                margin_bottom="0.75rem",
+            ),
+            rx.scroll_area(
+                rx.table.root(
+                    rx.table.header(
+                        rx.table.row(
+                            rx.table.column_header_cell("Concepto"),
+                            rx.table.column_header_cell("Meses", justify="end"),
+                            rx.table.column_header_cell("Último cargo", justify="end"),
+                            rx.table.column_header_cell("Importe", justify="end"),
+                        )
+                    ),
+                    rx.table.body(rx.foreach(BudgetState.recurring, _recurring_row)),
+                    variant="ghost",
+                    width="100%",
+                    min_width="28rem",
+                ),
+                type="auto",
+                scrollbars="horizontal",
+                width="100%",
+            ),
+            title="Cargos recurrentes",
+        ),
+    )
+
+
 @template(route="/presupuestos", title="Presupuestos", on_load=BudgetState.load_budgets)
 def presupuestos() -> rx.Component:
     return rx.vstack(
@@ -150,6 +198,7 @@ def presupuestos() -> rx.Component:
                 "Sube un extracto bancario en la sección Gastos para fijar presupuestos.",
             ),
         ),
+        _recurring_card(),
         spacing="6",
         width="100%",
     )

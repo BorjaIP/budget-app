@@ -1,4 +1,5 @@
 import logging
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import List
@@ -474,12 +475,16 @@ class TableState(rx.State):
     @rx.event(background=True)
     async def categorize_pending_expenses(self):
         from dashboard.llm.llm_call import categorize_expense
+        from dashboard.llm.run_stats import RunStats
+
+        stats = RunStats()
 
         async with self:
             self.is_categorizing = True
             self.categorization_progress = 0
             pending = db_manager.get_uncategorized_expenses(limit=500)
             self.categorization_total = len(pending)
+        logger.info("categorization run started: %d movements pending", len(pending))
 
         if not pending:
             async with self:
@@ -488,10 +493,13 @@ class TableState(rx.State):
 
         assigned = 0
         for index, expense in enumerate(pending):
+            started = time.perf_counter()
             try:
                 category, subcategory = await categorize_expense(expense.concept)
             except Exception:
+                stats.record_error()
                 logger.exception("The local model is not available")
+                logger.info(stats.summary())
                 async with self:
                     self.is_categorizing = False
                 yield rx.toast.warning(
@@ -499,6 +507,7 @@ class TableState(rx.State):
                 )
                 return
 
+            stats.record(category, subcategory, (time.perf_counter() - started) * 1000)
             db_manager.update_category(expense.id, category, subcategory, source="llm")
             if category:
                 assigned += 1
@@ -513,6 +522,7 @@ class TableState(rx.State):
             self.load_entries_from_database()
         async with self:
             self.can_undo_recategorize = self.router.session.client_token in _UNDO_SNAPSHOTS
+        logger.info(stats.summary())
         left = len(pending) - assigned
         message = f"Categorizados {assigned} de {len(pending)} movimientos."
         if left:

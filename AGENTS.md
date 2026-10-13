@@ -57,11 +57,18 @@ The Reflex app is configured in `rxconfig.py` with `app_name="dashboard"`. Entry
 
 - **Pages** (`pages/`): route handlers. The expenses page is at `expenses/page.py` → `/expenses`.
 - **State** (`expenses/state.py`): `TableState`, the Reflex reactive state for pagination, filtering, sorting, uploads, categorization and database access.
-- **Config** (`config.py`): `Settings` (pydantic-settings) reads environment variables and `.env`: `DATABASE_URL` (default `sqlite:///data/expenses.db`; PostgreSQL in Docker), `OLLAMA_BASE_URL`, `uploaded_files_dir`.
+- **Config** (`config.py`): `Settings` (pydantic-settings) reads environment variables and `.env`: `DATABASE_URL` (default `sqlite:///data/expenses.db`; PostgreSQL in Docker), `OLLAMA_BASE_URL`, `LOG_LEVEL`, `uploaded_files_dir`.
 - **Database** (`database/`): `DatabaseManager` in `operations.py` wraps SQLModel and creates its engine lazily from `settings.database_url`. `models.py` defines the `Expense` table. Schema changes on existing SQLite databases go through the additive guarded migration in `DatabaseManager._migrate_schema` (SQLite only; there is no Alembic).
 - **File processing** (`utils/`): `FileReader` parses uploaded `.xls`/`.xlsx` bank exports with Pandas (`xlrd` for `.xls`, `openpyxl` for `.xlsx`). `FileProcessor` handles the upload-to-database pipeline with deduplication.
 - **LLM** (`llm/`): `llm_call.py` calls Ollama (default model `qwen2.5:3b-instruct`) at `settings.ollama_base_url` (env `OLLAMA_BASE_URL`, default `http://localhost:11434`). The prompt (`prompt.py`) asks for `[Category][Subcategory]`; few-shot examples come from rows the user tagged by hand (`category_source = "manual"`), falling back to static examples. `CATEGORY_TAXONOMY` is reviewed by the owner: **never change its categories or subcategories**.
 - **UI components** (`components/`), **templates** (`templates/template.py`), **styles** (`styles.py`, Radix UI theme).
+
+### Logging
+
+The `dashboard` logger writes to stdout (`docker logs budget-app`). At `INFO` a categorization run logs only
+aggregates (`RunStats.summary()`: counts, fallbacks to Otros/General, errors, average ms, top categories) and
+warns on every fallback. Concepts and raw model answers come from bank data and are logged only with
+`LOG_LEVEL=DEBUG`; never paste those logs anywhere.
 
 ### Data flow
 

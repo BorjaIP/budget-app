@@ -14,6 +14,7 @@ class ExpenseBase(SQLModel):
     subcategory: Optional[str] = Field(default=None)
     bank_name: Optional[str] = Field(default=None, index=True)
     is_categorized: bool = Field(default=False, index=True)
+    category_source: Optional[str] = Field(default=None)
 
 
 class Expense(ExpenseBase, table=True):

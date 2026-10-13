@@ -79,7 +79,7 @@ def read_xlsx_to_array(filepath: str):
 if __name__ == "__main__":
     # For .xls files
     try:
-        xls_file_path = "../enero.xls"  # Replace with your .xls file path
+        xls_file_path = "data/enero.xls"  # Replace with your .xls file path
         print("Reading XLS file:")
         read_xls_to_array(xls_file_path)
     except Exception as e:
@@ -87,7 +87,7 @@ if __name__ == "__main__":
     
     # For .xlsx files
     try:
-        xlsx_file_path = "../enero.xlsx"  # Replace with your .xlsx file path
+        xlsx_file_path = "data/enero.xlsx"  # Replace with your .xlsx file path
         print("\nReading XLSX file:")
         read_xlsx_to_array(xlsx_file_path)
     except Exception as e:

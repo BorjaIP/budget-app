@@ -4,11 +4,11 @@ to the v2 schema (float amount/balance, ISO dates, dedupe_hash, bank_name, etc.)
 Usage:
     python scripts/migrate_v2.py [old_db] [new_db]
 
-Default paths: old=expenses.db, new=expenses_v2.db.
+Default paths: old=data/expenses.db, new=data/expenses_v2.db.
 
 After running:
-    mv expenses.db expenses.db.v1.bak
-    mv expenses_v2.db expenses.db
+    mv data/expenses.db data/expenses.db.v1.bak
+    mv data/expenses_v2.db data/expenses.db
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ from dashboard.utils.file_reader import (  # noqa: E402
 )
 
 
-def migrate(old_db: str = "expenses.db", new_db: str = "expenses_v2.db") -> None:
+def migrate(old_db: str = "data/expenses.db", new_db: str = "data/expenses_v2.db") -> None:
     old_path = Path(old_db)
     new_path = Path(new_db)
     if not old_path.exists():
@@ -98,11 +98,11 @@ def migrate(old_db: str = "expenses.db", new_db: str = "expenses_v2.db") -> None
         f"skipped_duplicate_in_source={skipped_duplicate}"
     )
     print(f"[migrate] new database written to {new_path}")
-    print("[migrate] next: mv expenses.db expenses.db.v1.bak && "
-          "mv expenses_v2.db expenses.db")
+    print("[migrate] next: mv data/expenses.db data/expenses.db.v1.bak && "
+          "mv data/expenses_v2.db data/expenses.db")
 
 
 if __name__ == "__main__":
-    old = sys.argv[1] if len(sys.argv) > 1 else "expenses.db"
-    new = sys.argv[2] if len(sys.argv) > 2 else "expenses_v2.db"
+    old = sys.argv[1] if len(sys.argv) > 1 else "data/expenses.db"
+    new = sys.argv[2] if len(sys.argv) > 2 else "data/expenses_v2.db"
     migrate(old, new)

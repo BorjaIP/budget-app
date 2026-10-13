@@ -1,34 +1,17 @@
 volumes:
-  gluetun:
   ollama:
+  postgres-data:
 
 networks:
   budget-net:
 
 services:
-  gluetun:
-    image: qmcgaw/gluetun
-    container_name: gluetun
-    privileged: true
-    cap_add:
-      - NET_ADMIN
-    ports:
-      - 11434:11434
-    volumes:
-      - gluetun:/gluetun
-    environment:
-      - VPN_SERVICE_PROVIDER=private internet access
-      - OPENVPN_USER=${OPENVPN_USER}
-      - OPENVPN_PASSWORD=${OPENVPN_PASSWORD}
-      - SERVER_REGIONS=france,switzerland,de_berlin
-
   ollama:
-    image: docker.io/ollama/ollama:0.6.3
+    image: docker.io/ollama/ollama:latest
     container_name: ollama
     restart: unless-stopped
-    # Used in VPN
-    # ports:
-      # - 11434:11434
+    ports:
+      - 11434:11434
     environment:
       - OLLAMA_HOST=0.0.0.0
       - CUDA_VISIBLE_DEVICES=0
@@ -36,9 +19,8 @@ services:
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
     volumes:
       - ollama:/root/.ollama
-    network_mode: "service:gluetun"
-    # networks:
-      # - budget-net
+    networks:
+      - budget-net
     tty: true
     deploy:
         resources:
@@ -47,3 +29,73 @@ services:
               - driver: nvidia
                 capabilities: [gpu]
                 count: all
+
+  # One-shot init container: tells the Ollama server to pull the model.
+  # The server downloads directly from registry.ollama.ai (Cloudflare).
+  # No VPN is part of this stack; if the registry is ever blocked, pull the
+  # model through a VPN or another machine into the `ollama` volume.
+  model-pull:
+    image: docker.io/ollama/ollama:latest
+    container_name: model-pull
+    depends_on:
+      ollama:
+        condition: service_started
+    networks:
+      - budget-net
+    environment:
+      - OLLAMA_HOST=ollama:11434
+    entrypoint:
+      - sh
+      - -c
+      - |
+        until ollama list >/dev/null 2>&1; do
+          echo "waiting for ollama at $$OLLAMA_HOST..."
+          sleep 3
+        done
+        for i in $$(seq 1 90); do
+          ollama pull qwen2.5:3b-instruct && exit 0
+          echo "pull failed, retry $$i/90 in 10s"
+          sleep 10
+        done
+        exit 1
+    restart: "no"
+
+  postgres:
+    image: postgres:17-alpine
+    container_name: budget-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: budget
+      POSTGRES_PASSWORD: budget
+      POSTGRES_DB: budget
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - budget-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U budget -d budget"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: budget-app
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    networks:
+      - budget-net
+    environment:
+      - DATABASE_URL=postgresql+psycopg2://budget:budget@postgres:5432/budget
+      - OLLAMA_BASE_URL=http://ollama:11434
+    ports:
+      - "3000:3000"
+      - "8000:8000"
+    volumes:
+      - ../data/uploaded_files:/app/data/uploaded_files

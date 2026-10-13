@@ -204,3 +204,13 @@ cython_debug/
 *.xlsx
 *.csv
 assets/external/
+
+# gentle-ai artifacts
+.atl/
+odd/
+
+# Local Claude Code permission rules (not shared)
+.claude/settings.json
+
+# Personal bank data: never commit
+data/

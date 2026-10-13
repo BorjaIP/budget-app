@@ -26,6 +26,14 @@ class ThemeState(rx.State):
     radius: str = "large"
     scaling: str = "100%"
 
+    @rx.event
+    def set_radius(self, value: str):
+        self.radius = value
+
+    @rx.event
+    def set_scaling(self, value: str):
+        self.scaling = value
+
 
 def template(
     route: str | None = None,

@@ -280,7 +280,7 @@ class TableState(rx.State):
         return TableState.load_entries_from_database
 
     def update_expense_category(self, expense_id: int, category: str, subcategory: str = ""):
-        ok = db_manager.update_category(expense_id, category, subcategory or None)
+        ok = db_manager.update_category(expense_id, category, subcategory or None, source="manual")
         if not ok:
             return rx.toast.error("No se pudo actualizar la categoría")
         return [
@@ -368,7 +368,7 @@ class TableState(rx.State):
                 )
                 return
 
-            db_manager.update_category(expense.id, category, subcategory)
+            db_manager.update_category(expense.id, category, subcategory, source="llm")
 
             async with self:
                 self.categorization_progress = index + 1
@@ -396,6 +396,10 @@ class TableState(rx.State):
 
     def close_upload_modal(self):
         self.show_upload_modal = False
+
+    @rx.event
+    def set_show_upload_modal(self, value: bool):
+        self.show_upload_modal = value
 
     def set_pending_bank_name(self, value: str):
         self.pending_bank_name = value

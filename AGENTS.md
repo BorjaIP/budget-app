@@ -115,5 +115,6 @@ Geist (self-hosted in `assets/fonts`), sentence case and no emojis.
 ## Conventions
 
 - Conventional Commits. Never stage unrelated work: add explicit paths, not `git add -A`.
-- Generated technical artifacts (code, comments, docs, tests) are written in English.
+- Generated technical artifacts (code, identifiers, file names, routes, comments, docs, tests) are written in English;
+  only text the user sees in the UI is Spanish (and data values such as the category names).
 - `odd/` and `.atl/` are local gentle-ai workflow files and are git-ignored.

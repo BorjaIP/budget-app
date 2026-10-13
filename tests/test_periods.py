@@ -67,6 +67,6 @@ def test_flow_totals_respect_the_range_and_uncategorized_count(tmp_path, monkeyp
         ]
     )
 
-    assert manager.get_flow_totals("2026-01-01", "2026-01-31") == {"ingresos": 1000.0, "gastos": 40.0}
-    assert manager.get_flow_totals() == {"ingresos": 1000.0, "gastos": 50.5}
+    assert manager.get_flow_totals("2026-01-01", "2026-01-31") == {"income": 1000.0, "spending": 40.0}
+    assert manager.get_flow_totals() == {"income": 1000.0, "spending": 50.5}
     assert manager.count_uncategorized() == 2

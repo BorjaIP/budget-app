@@ -1,6 +1,6 @@
-from .comparativa import comparativa
+from .comparison import comparison
 from .index import index
-from .presupuestos import presupuestos
+from .budgets import budgets
 from .settings import settings
 
-__all__ = ["comparativa", "index", "presupuestos", "settings"]
+__all__ = ["comparison", "index", "budgets", "settings"]

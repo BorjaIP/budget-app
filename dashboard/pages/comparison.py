@@ -14,8 +14,8 @@ from ..views.yearly_compare import (
 )
 
 
-@template(route="/comparativa", title="Comparativa", on_load=[YearlyCompareState.load_yearly_summary, CategoryTrendState.load_trend])
-def comparativa() -> rx.Component:
+@template(route="/comparison", title="Comparativa", on_load=[YearlyCompareState.load_yearly_summary, CategoryTrendState.load_trend])
+def comparison() -> rx.Component:
     return rx.vstack(
         page_header(
             "Comparativa anual",

@@ -10,8 +10,8 @@ from ..views.category_breakdown import category_breakdown
 from ..views.charts import (
     StatsState,
     date_filter_controls,
-    ingresos_gastos_chart,
-    saldo_chart,
+    income_spending_chart,
+    balance_chart,
 )
 from ..views.recent_transactions import recent_transactions
 from ..views.stats_cards import budget_stats_cards
@@ -58,8 +58,8 @@ def index() -> rx.Component:
             has_data | StatsState.is_loading | StatsState.load_error,
             rx.vstack(
                 rx.grid(
-                    card(ingresos_gastos_chart(), title="Ingresos vs gastos"),
-                    card(saldo_chart(), title="Evolución del saldo"),
+                    card(income_spending_chart(), title="Ingresos vs gastos"),
+                    card(balance_chart(), title="Evolución del saldo"),
                     gap="1rem",
                     grid_template_columns=["1fr", "1fr", "1fr", "3fr 2fr", "3fr 2fr"],
                     align_items="start",

@@ -368,26 +368,26 @@ class DatabaseManager:
         with self.get_session() as session:
             rows = session.exec(select(Expense)).all()
 
-        totals: dict[str, dict[str, float]] = defaultdict(lambda: {"ingresos": 0.0, "gastos": 0.0})
+        totals: dict[str, dict[str, float]] = defaultdict(lambda: {"income": 0.0, "spending": 0.0})
         for row in rows:
             year = row.operation_date[:4]
             if row.amount > 0:
-                totals[year]["ingresos"] += row.amount
+                totals[year]["income"] += row.amount
             else:
-                totals[year]["gastos"] += abs(row.amount)
+                totals[year]["spending"] += abs(row.amount)
 
         result = []
         for year in sorted(totals.keys()):
-            ingresos = totals[year]["ingresos"]
-            gastos = totals[year]["gastos"]
-            ahorro = ingresos - gastos
-            rate = (ahorro / ingresos * 100) if ingresos > 0 else 0.0
+            income = totals[year]["income"]
+            spending = totals[year]["spending"]
+            savings = income - spending
+            rate = (savings / income * 100) if income > 0 else 0.0
             result.append(
                 {
                     "year": year,
-                    "ingresos": round(ingresos, 2),
-                    "gastos": round(gastos, 2),
-                    "ahorro": round(ahorro, 2),
+                    "income": round(income, 2),
+                    "spending": round(spending, 2),
+                    "savings": round(savings, 2),
                     "savings_rate": round(rate, 1),
                 }
             )
@@ -405,8 +405,8 @@ class DatabaseManager:
                 statement = statement.where(Expense.operation_date <= date_to)
             amounts = session.exec(statement).all()
         return {
-            "ingresos": round(sum(a for a in amounts if a > 0), 2),
-            "gastos": round(sum(-a for a in amounts if a < 0), 2),
+            "income": round(sum(a for a in amounts if a > 0), 2),
+            "spending": round(sum(-a for a in amounts if a < 0), 2),
         }
 
     def count_existing_hashes(self, hashes: list[str]) -> int:

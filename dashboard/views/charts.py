@@ -43,8 +43,8 @@ def _format_currency(value: float) -> str:
 class StatsState(rx.State):
     available_years: list[str] = []
     period: str = DEFAULT_PRESET
-    prev_ingresos: float | None = None
-    prev_gastos: float | None = None
+    prev_income: float | None = None
+    prev_spending: float | None = None
     uncategorized_count: int = 0
     latest_date: str = ""
     daily_mode: bool = False
@@ -84,9 +84,9 @@ class StatsState(rx.State):
             monthly = not period.daily
             self.daily_mode = period.daily
 
-            ingresos: dict[str, float] = defaultdict(float)
-            gastos: dict[str, float] = defaultdict(float)
-            saldo: dict[str, float] = {}
+            income: dict[str, float] = defaultdict(float)
+            spending: dict[str, float] = defaultdict(float)
+            balance: dict[str, float] = {}
 
             for expense in expenses:
                 op_date = expense.operation_date
@@ -96,32 +96,32 @@ class StatsState(rx.State):
                     continue
                 bucket = op_date[:7] if monthly else op_date
                 if expense.amount > 0:
-                    ingresos[bucket] += expense.amount
+                    income[bucket] += expense.amount
                 else:
-                    gastos[bucket] += abs(expense.amount)
+                    spending[bucket] += abs(expense.amount)
                 # expenses are ordered newest-first, so the first hit per
                 # bucket is already its most recent balance.
-                if bucket not in saldo:
-                    saldo[bucket] = expense.balance
+                if bucket not in balance:
+                    balance[bucket] = expense.balance
 
-            all_buckets = sorted(set(ingresos) | set(gastos) | set(saldo))
+            all_buckets = sorted(set(income) | set(spending) | set(balance))
             humanize = _humanize_month if monthly else _humanize
             self.chart_data = [
                 {
                     "date": humanize(b),
-                    "ingresos": round(ingresos.get(b, 0.0), 2),
-                    "gastos": round(gastos.get(b, 0.0), 2),
-                    "saldo": round(saldo.get(b, 0.0), 2),
+                    "income": round(income.get(b, 0.0), 2),
+                    "spending": round(spending.get(b, 0.0), 2),
+                    "balance": round(balance.get(b, 0.0), 2),
                 }
                 for b in all_buckets
             ]
 
             if period.prev_from:
                 previous = db_manager.get_flow_totals(period.prev_from, period.prev_to)
-                self.prev_ingresos = previous["ingresos"]
-                self.prev_gastos = previous["gastos"]
+                self.prev_income = previous["income"]
+                self.prev_spending = previous["spending"]
             else:
-                self.prev_ingresos = self.prev_gastos = None
+                self.prev_income = self.prev_spending = None
             self.uncategorized_count = db_manager.count_uncategorized()
             self.unusual = find_unusual(expenses, max_date)
 
@@ -173,64 +173,64 @@ class StatsState(rx.State):
             self.is_loading = False
 
     @rx.var(cache=True)
-    def total_ingresos(self) -> float:
-        return sum(d.get("ingresos", 0) for d in self.chart_data)
+    def total_income(self) -> float:
+        return sum(d.get("income", 0) for d in self.chart_data)
 
     @rx.var(cache=True)
-    def total_gastos(self) -> float:
-        return sum(d.get("gastos", 0) for d in self.chart_data)
+    def total_spending(self) -> float:
+        return sum(d.get("spending", 0) for d in self.chart_data)
 
     @rx.var(cache=True)
-    def total_ingresos_fmt(self) -> str:
-        return _format_currency(self.total_ingresos)
+    def total_income_fmt(self) -> str:
+        return _format_currency(self.total_income)
 
     @rx.var(cache=True)
-    def total_gastos_fmt(self) -> str:
-        return _format_currency(self.total_gastos)
+    def total_spending_fmt(self) -> str:
+        return _format_currency(self.total_spending)
 
     @rx.var(cache=True)
-    def saldo_neto_fmt(self) -> str:
+    def net_balance_fmt(self) -> str:
         if not self.chart_data:
             return _format_currency(0.0)
-        return _format_currency(self.chart_data[-1].get("saldo", 0))
+        return _format_currency(self.chart_data[-1].get("balance", 0))
 
     @rx.var(cache=True)
     def savings_rate_fmt(self) -> str:
-        if self.total_ingresos <= 0:
+        if self.total_income <= 0:
             return "-"
-        rate = (self.total_ingresos - self.total_gastos) / self.total_ingresos * 100
+        rate = (self.total_income - self.total_spending) / self.total_income * 100
         return f"{rate:.1f} %".replace(".", ",")
 
     @rx.var(cache=True)
-    def gastos_avg(self) -> float:
-        spent = [d["gastos"] for d in self.chart_data if d.get("gastos", 0) > 0]
+    def spending_avg(self) -> float:
+        spent = [d["spending"] for d in self.chart_data if d.get("spending", 0) > 0]
         return round(sum(spent) / len(spent), 2) if spent else 0.0
 
     @rx.var(cache=True)
-    def gastos_avg_line(self) -> int:
+    def spending_avg_line(self) -> int:
         """Whole euros: the reference line only accepts str or int."""
-        return round(self.gastos_avg)
+        return round(self.spending_avg)
 
     @rx.var(cache=True)
     def chart_summary(self) -> str:
         """Text alternative for the income vs spending chart."""
-        spent = [d for d in self.chart_data if d.get("gastos", 0) > 0]
+        spent = [d for d in self.chart_data if d.get("spending", 0) > 0]
         if not spent:
             return ""
         unit = "día" if self.daily_mode else "mes"
-        peak = max(spent, key=lambda d: d["gastos"])
+        peak = max(spent, key=lambda d: d["spending"])
         return (
-            f"La línea punteada marca el gasto medio por {unit}: {_format_currency(self.gastos_avg)}. "
-            f"El más alto fue {peak['date']} con {_format_currency(peak['gastos'])}."
+            f"La línea punteada marca el gasto medio por {unit}: {_format_currency(self.spending_avg)}. "
+            f"El más alto fue {peak['date']} con {_format_currency(peak['spending'])}."
         )
 
     @rx.var(cache=True)
-    def ingresos_delta(self) -> str:
-        return _delta_label(self.total_ingresos, self.prev_ingresos)
+    def income_delta(self) -> str:
+        return _delta_label(self.total_income, self.prev_income)
 
     @rx.var(cache=True)
-    def gastos_delta(self) -> str:
-        return _delta_label(self.total_gastos, self.prev_gastos)
+    def spending_delta(self) -> str:
+        return _delta_label(self.total_spending, self.prev_spending)
 
     @rx.var(cache=True)
     def uncategorized_label(self) -> str:
@@ -391,7 +391,7 @@ def date_filter_controls() -> rx.Component:
     )
 
 
-def ingresos_gastos_chart() -> rx.Component:
+def income_spending_chart() -> rx.Component:
     return rx.cond(
         StatsState.is_loading,
         _loading_placeholder(),
@@ -403,10 +403,10 @@ def ingresos_gastos_chart() -> rx.Component:
                     rx.recharts.bar_chart(
                         _custom_tooltip(),
                         rx.recharts.cartesian_grid(horizontal=True, vertical=False),
-                        rx.recharts.bar(name="Ingresos", data_key="ingresos", fill=rx.color("green", 9)),
-                        rx.recharts.bar(name="Gastos", data_key="gastos", fill=rx.color("red", 9)),
+                        rx.recharts.bar(name="Ingresos", data_key="income", fill=rx.color("green", 9)),
+                        rx.recharts.bar(name="Gastos", data_key="spending", fill=rx.color("red", 9)),
                         rx.recharts.reference_line(
-                            y=StatsState.gastos_avg_line,
+                            y=StatsState.spending_avg_line,
                             stroke=rx.color("gray", 10),
                             stroke_dasharray="4 4",
                         ),
@@ -428,7 +428,7 @@ def ingresos_gastos_chart() -> rx.Component:
     )
 
 
-def saldo_chart() -> rx.Component:
+def balance_chart() -> rx.Component:
     return rx.cond(
         StatsState.is_loading,
         _loading_placeholder(),
@@ -440,7 +440,7 @@ def saldo_chart() -> rx.Component:
                 rx.recharts.cartesian_grid(horizontal=True, vertical=False),
                 rx.recharts.area(
                     name="Saldo",
-                    data_key="saldo",
+                    data_key="balance",
                     stroke=rx.color("gray", 12),
                     stroke_width=1.5,
                     fill=rx.color("gray", 4, True),

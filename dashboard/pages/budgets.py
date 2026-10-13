@@ -174,8 +174,8 @@ def _recurring_card() -> rx.Component:
     )
 
 
-@template(route="/presupuestos", title="Presupuestos", on_load=BudgetState.load_budgets)
-def presupuestos() -> rx.Component:
+@template(route="/budgets", title="Presupuestos", on_load=BudgetState.load_budgets)
+def budgets() -> rx.Component:
     return rx.vstack(
         page_header(
             "Presupuestos",

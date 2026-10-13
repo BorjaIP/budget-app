@@ -17,12 +17,12 @@ logger = logging.getLogger(__name__)
 
 class YearRow(pydantic.BaseModel):
     year: str = ""
-    ingresos: float = 0.0
-    gastos: float = 0.0
-    ahorro: float = 0.0
-    ingresos_fmt: str = ""
-    gastos_fmt: str = ""
-    ahorro_fmt: str = ""
+    income: float = 0.0
+    spending: float = 0.0
+    savings: float = 0.0
+    income_fmt: str = ""
+    spending_fmt: str = ""
+    savings_fmt: str = ""
     savings_rate: float = 0.0
     savings_rate_fmt: str = ""
 
@@ -42,12 +42,12 @@ class YearlyCompareState(rx.State):
             self.rows = [
                 YearRow(
                     year=r["year"],
-                    ingresos=r["ingresos"],
-                    gastos=r["gastos"],
-                    ahorro=r["ahorro"],
-                    ingresos_fmt=_format_currency(r["ingresos"]),
-                    gastos_fmt=_format_currency(r["gastos"]),
-                    ahorro_fmt=_format_currency(r["ahorro"]),
+                    income=r["income"],
+                    spending=r["spending"],
+                    savings=r["savings"],
+                    income_fmt=_format_currency(r["income"]),
+                    spending_fmt=_format_currency(r["spending"]),
+                    savings_fmt=_format_currency(r["savings"]),
                     savings_rate=r["savings_rate"],
                     savings_rate_fmt=f"{r['savings_rate']:.1f} %".replace(".", ","),
                 )
@@ -56,9 +56,9 @@ class YearlyCompareState(rx.State):
             self.chart_data = [
                 {
                     "year": r["year"],
-                    "ingresos": r["ingresos"],
-                    "gastos": r["gastos"],
-                    "ahorro": r["ahorro"],
+                    "income": r["income"],
+                    "spending": r["spending"],
+                    "savings": r["savings"],
                 }
                 for r in summary
             ]
@@ -88,9 +88,9 @@ def yearly_compare_chart() -> rx.Component:
             rx.recharts.bar_chart(
                 _custom_tooltip(),
                 rx.recharts.cartesian_grid(horizontal=True, vertical=False),
-                rx.recharts.bar(name="Ingresos", data_key="ingresos", fill=rx.color("green", 9)),
-                rx.recharts.bar(name="Gastos", data_key="gastos", fill=rx.color("red", 9)),
-                rx.recharts.bar(name="Ahorro", data_key="ahorro", fill=rx.color("gray", 12)),
+                rx.recharts.bar(name="Ingresos", data_key="income", fill=rx.color("green", 9)),
+                rx.recharts.bar(name="Gastos", data_key="spending", fill=rx.color("red", 9)),
+                rx.recharts.bar(name="Ahorro", data_key="savings", fill=rx.color("gray", 12)),
                 _x_axis("year"),
                 rx.recharts.y_axis(
                     tick_formatter=_Y_TICK_FORMATTER,
@@ -110,14 +110,14 @@ def yearly_compare_chart() -> rx.Component:
 def _table_row(row: YearRow) -> rx.Component:
     return rx.table.row(
         rx.table.row_header_cell(rx.text(row.year, weight="medium", class_name="num")),
-        rx.table.cell(rx.text(row.ingresos_fmt, class_name="num"), justify="end"),
-        rx.table.cell(rx.text(row.gastos_fmt, class_name="num"), justify="end"),
+        rx.table.cell(rx.text(row.income_fmt, class_name="num"), justify="end"),
+        rx.table.cell(rx.text(row.spending_fmt, class_name="num"), justify="end"),
         rx.table.cell(
             rx.text(
-                row.ahorro_fmt,
+                row.savings_fmt,
                 weight="medium",
                 class_name="num",
-                color=rx.cond(row.ahorro >= 0, rx.color("green", 11), rx.color("red", 11)),
+                color=rx.cond(row.savings >= 0, rx.color("green", 11), rx.color("red", 11)),
             ),
             justify="end",
         ),

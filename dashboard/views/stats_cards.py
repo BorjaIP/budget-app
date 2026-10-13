@@ -39,12 +39,12 @@ def budget_stats_cards() -> rx.Component:
     return rx.grid(
         _stat(
             "Saldo",
-            StatsState.saldo_neto_fmt,
+            StatsState.net_balance_fmt,
             lead=True,
             grid_column=["span 2", "span 2", "span 2", "span 1", "span 1"],
         ),
-        _stat("Ingresos", StatsState.total_ingresos_fmt, rx.color("green", 11), StatsState.ingresos_delta),
-        _stat("Gastos", StatsState.total_gastos_fmt, rx.color("red", 11), StatsState.gastos_delta),
+        _stat("Ingresos", StatsState.total_income_fmt, rx.color("green", 11), StatsState.income_delta),
+        _stat("Gastos", StatsState.total_spending_fmt, rx.color("red", 11), StatsState.spending_delta),
         _stat("Tasa de ahorro", StatsState.savings_rate_fmt),
         gap="1px",
         grid_template_columns=[

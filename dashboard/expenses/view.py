@@ -1,6 +1,7 @@
 import reflex as rx
 
-from dashboard.components.category_badge import CATEGORY_NAMES, category_badge
+from dashboard.components.category_badge import category_badge
+from dashboard.taxonomy_state import TaxonomyState
 from dashboard.components.empty_state import empty_state
 from dashboard.components.icon import icon
 from dashboard.expenses.model import Item
@@ -212,14 +213,14 @@ def _category_filter() -> rx.Component:
                 rx.text("Filtrar por categoría", size="2", weight="medium"),
                 rx.scroll_area(
                     rx.vstack(
-                        *[
-                            rx.checkbox(
+                        rx.foreach(
+                            TaxonomyState.categories_and_unassigned,
+                            lambda name: rx.checkbox(
                                 name,
                                 checked=TableState.selected_categories.contains(name),
-                                on_change=lambda _, n=name: TableState.toggle_category(n),
-                            )
-                            for name in [*CATEGORY_NAMES, "Sin categorizar"]
-                        ],
+                                on_change=lambda _: TableState.toggle_category(name),
+                            ),
+                        ),
                         spacing="2",
                         align_items="start",
                         padding="0.25em 0.5em",
@@ -521,7 +522,7 @@ def _bulk_bar() -> rx.Component:
                 size="2",
             ),
             rx.select(
-                CATEGORY_NAMES,
+                TaxonomyState.categories,
                 placeholder="Asignar categoría",
                 on_change=TableState.apply_bulk_category,
                 size="2",

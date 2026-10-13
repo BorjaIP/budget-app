@@ -11,6 +11,7 @@ from ..components.bottom_nav import bottom_nav
 from ..components.categorization_results import categorization_banner, results_dialog
 from ..components.navbar import navbar
 from ..components.sidebar import sidebar
+from ..taxonomy_state import TaxonomyState
 
 
 default_meta = [
@@ -19,29 +20,6 @@ default_meta = [
         "content": "width=device-width, shrink-to-fit=no, initial-scale=1",
     },
 ]
-
-
-class ThemeState(rx.State):
-    accent_color: str = "gray"
-    gray_color: str = "sand"
-    radius: str = "medium"
-    scaling: str = "100%"
-
-    @rx.event
-    def set_accent_color(self, value: str):
-        self.accent_color = value
-
-    @rx.event
-    def set_gray_color(self, value: str):
-        self.gray_color = value
-
-    @rx.event
-    def set_radius(self, value: str):
-        self.radius = value
-
-    @rx.event
-    def set_scaling(self, value: str):
-        self.scaling = value
 
 
 def template(
@@ -54,6 +32,8 @@ def template(
 ) -> Callable[[Callable[[], rx.Component]], rx.Component]:
     def decorator(page_content: Callable[[], rx.Component]) -> rx.Component:
         all_meta = [*default_meta, *(meta or [])]
+        extra = on_load if isinstance(on_load, list) else ([on_load] if on_load is not None else [])
+        page_on_load = [TaxonomyState.load_taxonomy, *extra]  # every page needs the user's categories
 
         def templated_page() -> rx.Component:
             return rx.flex(
@@ -92,17 +72,17 @@ def template(
             description=description,
             meta=all_meta,
             script_tags=script_tags,
-            on_load=on_load,
+            on_load=page_on_load,
         )
         def theme_wrap() -> rx.Component:
             return rx.theme(
                 templated_page(),
                 has_background=True,
                 panel_background="solid",
-                accent_color=ThemeState.accent_color,
-                gray_color=ThemeState.gray_color,
-                radius=ThemeState.radius,
-                scaling=ThemeState.scaling,
+                accent_color="gray",
+                gray_color="sand",
+                radius="medium",
+                scaling="100%",
             )
 
         return theme_wrap

@@ -15,7 +15,7 @@ from pathlib import Path
 from sqlmodel import Session, SQLModel, create_engine
 
 from dashboard.database.models import CategoryBudget, Expense
-from dashboard.llm.llm_call import CATEGORY_TAXONOMY
+from dashboard.taxonomy import DEFAULT_TAXONOMY
 
 # (category, subcategory, concepts, typical amount range, monthly occurrences)
 SPENDING = [
@@ -50,7 +50,7 @@ def month_start(anchor: date, back: int) -> date:
 
 
 def build_rows(rng: random.Random) -> list[Expense]:
-    assert all(c in CATEGORY_TAXONOMY and s in CATEGORY_TAXONOMY[c] for c, s, *_ in SPENDING)
+    assert all(c in DEFAULT_TAXONOMY and s in DEFAULT_TAXONOMY[c] for c, s, *_ in SPENDING)
     rows: list[Expense] = []
     for back in range(MONTHS - 1, -1, -1):
         start = month_start(ANCHOR, back)

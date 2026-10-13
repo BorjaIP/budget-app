@@ -11,6 +11,7 @@ from dashboard.config import settings as app_settings
 from dashboard.database.operations import db_manager
 from dashboard.expenses.model import Item
 from dashboard.llm.merchant import merchant_key
+from dashboard.taxonomy import NO_SUBCATEGORY
 from dashboard.utils.file_processor import file_processor
 
 logger = logging.getLogger(__name__)
@@ -422,6 +423,7 @@ class TableState(rx.State):
         return rx.toast.success(message)
 
     def update_expense_category(self, expense_id: int, category: str, subcategory: str = ""):
+        subcategory = "" if subcategory == NO_SUBCATEGORY else subcategory
         ok = db_manager.update_category(expense_id, category, subcategory or None, source="manual")
         if not ok:
             return rx.toast.error("No se pudo actualizar la categoría")
@@ -537,6 +539,7 @@ class TableState(rx.State):
         """
         from dashboard.llm.llm_call import categorize_with_confidence
         from dashboard.llm.retrieval import SimilarityIndex, confident_match
+        from dashboard.taxonomy import for_amount
         from dashboard.llm.run_stats import RunStats
 
         stats = RunStats()
@@ -550,6 +553,7 @@ class TableState(rx.State):
             self.categorization_total = len(pending)
         learned = await asyncio.to_thread(db_manager.sync_merchant_memory)
         labels = await asyncio.to_thread(db_manager.get_merchant_labels)
+        taxonomy = await asyncio.to_thread(db_manager.taxonomy.load)
         index = SimilarityIndex(labels)
         logger.info("categorization run started: %d movements pending (%d labels backfilled)", len(pending), learned)
 
@@ -561,8 +565,13 @@ class TableState(rx.State):
         assigned = 0
         for position, expense in enumerate(pending):
             started = time.perf_counter()
+            allowed = {c.name for c in for_amount(taxonomy, expense.amount)}  # income vs expense categories
             remembered = await asyncio.to_thread(db_manager.get_merchant_label, merchant_key(expense.concept))
+            if remembered and remembered["category"] not in allowed:
+                remembered = None
             match = None if remembered else confident_match(index.search(expense.concept, 3))
+            if match and match[1]["category"] not in allowed:
+                match = None
             if remembered:  # the user already taught the app this merchant: same answer every time
                 stats.record_memory()
                 await asyncio.to_thread(
@@ -579,7 +588,7 @@ class TableState(rx.State):
             else:
                 try:
                     category, subcategory, confidence = await categorize_with_confidence(
-                        expense.concept, labels=labels, index=index
+                        expense.concept, taxonomy, labels=labels, index=index, amount=expense.amount
                     )
                 except Exception:
                     stats.record_error()

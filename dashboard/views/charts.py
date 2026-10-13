@@ -1,20 +1,32 @@
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime
 
+import pydantic
 import reflex as rx
 from reflex.components.radix.themes.base import LiteralAccentColor
 
 from dashboard.database.operations import db_manager
 
+_MONTH_NAMES_ES = [
+    "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+]
+_MONTH_NUMBER = {name: f"{i + 1:02d}" for i, name in enumerate(_MONTH_NAMES_ES)}
+_MONTH_ABBR_ES = {
+    "01": "ene", "02": "feb", "03": "mar", "04": "abr", "05": "may", "06": "jun",
+    "07": "jul", "08": "ago", "09": "sep", "10": "oct", "11": "nov", "12": "dic",
+}
+_DAYS_IN_MONTH = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
 
-class ConceptRow(rx.Base):
+
+class ConceptRow(pydantic.BaseModel):
     concept: str = ""
     total: float = 0.0
     total_fmt: str = ""
     count: int = 0
 
 
-class RecentRow(rx.Base):
+class RecentRow(pydantic.BaseModel):
     id: int = 0
     operation_date: str = ""
     concept: str = ""
@@ -30,31 +42,48 @@ def _format_currency(value: float) -> str:
 
 
 class StatsState(rx.State):
-    date_filter: str = "all"
+    available_years: list[str] = []
+    selected_year: str = "Todo"
+    selected_month: str = "Todo"
+    data_range_label: str = ""
     chart_data: list[dict] = []
     category_breakdown: list[dict] = []
     top_concepts: list[ConceptRow] = []
     recent_expenses: list[RecentRow] = []
     is_loading: bool = False
 
+    @rx.var(cache=True)
+    def year_options(self) -> list[str]:
+        return ["Todo", *self.available_years]
+
+    @rx.var(cache=True)
+    def month_options(self) -> list[str]:
+        return ["Todo", *_MONTH_NAMES_ES]
+
     def _date_range(self) -> tuple[str | None, str | None]:
-        now = datetime.now()
-        if self.date_filter == "1m":
-            start = now - timedelta(days=30)
-        elif self.date_filter == "6m":
-            start = now - timedelta(days=180)
-        elif self.date_filter == "1y":
-            start = now - timedelta(days=365)
-        else:
+        if self.selected_year == "Todo":
             return None, None
-        return start.strftime("%Y-%m-%d"), now.strftime("%Y-%m-%d")
+        year = int(self.selected_year)
+        if self.selected_month == "Todo":
+            return f"{year}-01-01", f"{year}-12-31"
+        month_num = _MONTH_NUMBER[self.selected_month]
+        last_day = _DAYS_IN_MONTH[int(month_num) - 1]
+        return f"{year}-{month_num}-01", f"{year}-{month_num}-{last_day:02d}"
 
     @rx.event
     async def load_chart_data(self):
         self.is_loading = True
         try:
+            self.available_years = db_manager.get_available_years()
+            min_date, max_date = db_manager.get_date_bounds()
+            self.data_range_label = _format_range_label(min_date, max_date)
+
             date_from, date_to = self._date_range()
             expenses = db_manager.get_all_expenses()
+
+            # Daily buckets when a single month is selected, monthly otherwise
+            # (a full year of daily points overlaps and becomes unreadable).
+            monthly = self.selected_month == "Todo"
 
             ingresos: dict[str, float] = defaultdict(float)
             gastos: dict[str, float] = defaultdict(float)
@@ -66,21 +95,26 @@ class StatsState(rx.State):
                     continue
                 if date_to and op_date > date_to:
                     continue
+                bucket = op_date[:7] if monthly else op_date
                 if expense.amount > 0:
-                    ingresos[op_date] += expense.amount
+                    ingresos[bucket] += expense.amount
                 else:
-                    gastos[op_date] += abs(expense.amount)
-                saldo[op_date] = expense.balance
+                    gastos[bucket] += abs(expense.amount)
+                # expenses are ordered newest-first, so the first hit per
+                # bucket is already its most recent balance.
+                if bucket not in saldo:
+                    saldo[bucket] = expense.balance
 
-            all_dates = sorted(set(ingresos) | set(gastos) | set(saldo))
+            all_buckets = sorted(set(ingresos) | set(gastos) | set(saldo))
+            humanize = _humanize_month if monthly else _humanize
             self.chart_data = [
                 {
-                    "date": _humanize(d),
-                    "ingresos": round(ingresos.get(d, 0.0), 2),
-                    "gastos": round(gastos.get(d, 0.0), 2),
-                    "saldo": round(saldo.get(d, 0.0), 2),
+                    "date": humanize(b),
+                    "ingresos": round(ingresos.get(b, 0.0), 2),
+                    "gastos": round(gastos.get(b, 0.0), 2),
+                    "saldo": round(saldo.get(b, 0.0), 2),
                 }
-                for d in all_dates
+                for b in all_buckets
             ]
 
             self.category_breakdown = [
@@ -166,8 +200,15 @@ class StatsState(rx.State):
         return "red"
 
     @rx.event
-    async def set_date_preset(self, value: str | list[str]):
-        self.date_filter = value if isinstance(value, str) else value[0]
+    async def set_selected_year(self, value: str | list[str]):
+        self.selected_year = value if isinstance(value, str) else (value[0] if value else "Todo")
+        if self.selected_year == "Todo":
+            self.selected_month = "Todo"
+        await self.load_chart_data()
+
+    @rx.event
+    async def set_selected_month(self, value: str | list[str]):
+        self.selected_month = value if isinstance(value, str) else (value[0] if value else "Todo")
         await self.load_chart_data()
 
 
@@ -178,7 +219,21 @@ def _humanize(iso_date: str) -> str:
         return iso_date
 
 
-_Y_TICK_FORMATTER = rx.Var(
+def _humanize_month(bucket: str) -> str:
+    try:
+        year, month = bucket.split("-")
+        return f"{_MONTH_ABBR_ES.get(month, month)} {year}"
+    except ValueError:
+        return bucket
+
+
+def _format_range_label(min_date: str | None, max_date: str | None) -> str:
+    if not min_date or not max_date:
+        return "Sin datos cargados todavía"
+    return f"Datos disponibles: {_humanize(min_date)} – {_humanize(max_date)}"
+
+
+_Y_TICK_FORMATTER = (
     "(value) => {"
     "  if (Math.abs(value) >= 1000000) return (value / 1000000).toFixed(1) + 'M €';"
     "  if (Math.abs(value) >= 1000) return (value / 1000).toFixed(1) + 'K €';"
@@ -238,18 +293,34 @@ def _loading_placeholder() -> rx.Component:
 
 
 def date_filter_controls() -> rx.Component:
-    return rx.hstack(
-        rx.segmented_control.root(
-            rx.segmented_control.item("Todo", value="all"),
-            rx.segmented_control.item("1 mes", value="1m"),
-            rx.segmented_control.item("6 meses", value="6m"),
-            rx.segmented_control.item("1 año", value="1y"),
-            value=StatsState.date_filter,
-            on_change=StatsState.set_date_preset,
+    return rx.vstack(
+        rx.hstack(
+            rx.select(
+                StatsState.year_options,
+                value=StatsState.selected_year,
+                on_change=StatsState.set_selected_year,
+                size="2",
+            ),
+            rx.cond(
+                StatsState.selected_year != "Todo",
+                rx.select(
+                    StatsState.month_options,
+                    value=StatsState.selected_month,
+                    on_change=StatsState.set_selected_month,
+                    size="2",
+                ),
+            ),
+            spacing="3",
+            align="center",
+            wrap="wrap",
         ),
-        spacing="4",
-        align="center",
-        wrap="wrap",
+        rx.text(
+            StatsState.data_range_label,
+            size="1",
+            color=rx.color("gray", 10),
+        ),
+        spacing="1",
+        align="end",
     )
 
 

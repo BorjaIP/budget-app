@@ -31,7 +31,8 @@ def test_a_new_database_starts_with_the_owner_defaults(tmp_path, monkeypatch):
 
     taxonomy = manager.taxonomy.load()
 
-    assert category_names(taxonomy) == list(DEFAULT_TAXONOMY)
+    assert category_names(taxonomy, "expense") == list(DEFAULT_TAXONOMY)
+    assert [c.name for c in taxonomy if c.kind == "income"] == ["Nómina"]
     assert subcategory_names(taxonomy, "Ocio") == DEFAULT_TAXONOMY["Ocio"]
 
 
@@ -129,7 +130,8 @@ def test_reset_restores_defaults_and_rescues_orphan_expenses(tmp_path, monkeypat
 
     taxonomy = manager.taxonomy.load()
     assert moved == 1 and (_row(manager, expense_id).category, _row(manager, expense_id).subcategory) == ("Otros", "General")
-    assert category_names(taxonomy) == list(DEFAULT_TAXONOMY)
+    assert category_names(taxonomy, "expense") == list(DEFAULT_TAXONOMY)
+    assert "Nómina" in category_names(taxonomy)
     assert "Libros" in subcategory_names(taxonomy, "Ocio")
 
 
@@ -139,3 +141,56 @@ def test_normalize_pair_applies_the_parent_and_otros_rules(tmp_path, monkeypatch
     assert normalize_pair(taxonomy, "Ocio", "Libros") == ("Ocio", "Libros")
     assert normalize_pair(taxonomy, "Ocio", "Inexistente") == ("Ocio", None)
     assert normalize_pair(taxonomy, "Inexistente", "Libros") == ("Otros", "General")
+
+
+def test_income_categories_can_be_added_retyped_and_otros_has_no_kind(tmp_path, monkeypatch):
+    manager = _manager(tmp_path, monkeypatch)
+    manager.taxonomy.add_category("Freelance", "facturas a clientes", kind="income")
+    manager.taxonomy.add_category("Mascotas")
+
+    taxonomy = manager.taxonomy.load()
+
+    assert {c.name: c.kind for c in taxonomy}["Freelance"] == "income"
+    assert {c.name: c.kind for c in taxonomy}["Mascotas"] == "expense"
+    manager.taxonomy.update_category("Mascotas", kind="income")
+    assert {c.name: c.kind for c in manager.taxonomy.load()}["Mascotas"] == "income"
+    with pytest.raises(TaxonomyError, match="sin tipo|no tiene tipo"):
+        manager.taxonomy.update_category("Otros", kind="income")
+    with pytest.raises(ValueError, match="tipo"):
+        manager.taxonomy.add_category("Raro", kind="otro")
+
+
+def test_a_movement_can_only_have_categories_of_its_own_kind_plus_otros(tmp_path, monkeypatch):
+    from dashboard.taxonomy import for_amount
+
+    taxonomy = _manager(tmp_path, monkeypatch).taxonomy.load()
+
+    income_names = {c.name for c in for_amount(taxonomy, 2100.0)}
+    expense_names = {c.name for c in for_amount(taxonomy, -20.0)}
+
+    assert income_names == {"Nómina", "Otros"}
+    assert "Nómina" not in expense_names and {"Ocio", "Otros"} <= expense_names
+
+
+def test_an_old_database_gets_the_kind_column_and_the_default_income_category_once(tmp_path, monkeypatch):
+    import sqlite3
+
+    monkeypatch.chdir(tmp_path)
+    db = tmp_path / "expenses.db"
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE TABLE category (name TEXT PRIMARY KEY, description TEXT, position INTEGER)")
+    conn.execute("CREATE TABLE subcategory (id INTEGER PRIMARY KEY, category TEXT, name TEXT, description TEXT, position INTEGER)")
+    conn.execute("INSERT INTO category VALUES ('Ocio', '', 0)")
+    conn.execute("INSERT INTO category VALUES ('Otros', '', 1)")
+    conn.commit()
+    conn.close()
+    from dashboard.database.operations import DatabaseManager
+
+    manager = DatabaseManager(database_url=f"sqlite:///{db}")
+    first = {c.name: c.kind for c in manager.taxonomy.load()}
+    manager.taxonomy.delete_category("Nómina")  # the user does not want it
+    manager2 = DatabaseManager(database_url=f"sqlite:///{db}")  # restart: must not come back
+    second = {c.name: c.kind for c in manager2.taxonomy.load()}
+
+    assert first == {"Ocio": "expense", "Otros": "expense", "Nómina": "income"}
+    assert "Nómina" not in second

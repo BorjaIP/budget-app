@@ -7,7 +7,7 @@ import reflex as rx
 
 from dashboard.database.operations import db_manager
 from dashboard.database.taxonomy_repository import TaxonomyError
-from dashboard.taxonomy import FALLBACK, NO_SUBCATEGORY, OTHERS
+from dashboard.taxonomy import FALLBACK, KIND_EXPENSE, KIND_INCOME, NO_SUBCATEGORY, OTHERS
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +24,7 @@ DEFAULT_COLORS = {
     "Transporte": "cyan",
     "Viajes": "teal",
     "Servicios básicos": "green",
+    "Nómina": "jade",
     "Otros": "gray",
 }
 _PALETTE = ["crimson", "orange", "lime", "plum", "sky", "mint", "bronze", "violet", "jade", "brown", "yellow", "grass"]
@@ -41,8 +42,13 @@ class SubRow(pydantic.BaseModel):
     reserved: bool = False
 
 
+KIND_LABELS = {KIND_EXPENSE: "Gasto", KIND_INCOME: "Ingreso"}
+KIND_BY_LABEL = {label: kind for kind, label in KIND_LABELS.items()}
+
+
 class CategoryRow(pydantic.BaseModel):
     name: str = ""
+    kind: str = KIND_EXPENSE
     description: str = ""
     color: str = "gray"
     reserved: bool = False
@@ -56,6 +62,7 @@ class TaxonomyState(rx.State):
     # category picker of a movement (one popover is open at a time)
     picker_category: str = ""
     picker_subcategory: str = NO_SUBCATEGORY
+    picker_kind: str = KIND_EXPENSE  # kind of the movement being categorized
 
     # edit dialog
     show_edit: bool = False
@@ -64,6 +71,7 @@ class TaxonomyState(rx.State):
     edit_original: str = ""
     edit_name: str = ""
     edit_description: str = ""
+    edit_type_label: str = KIND_LABELS[KIND_EXPENSE]
 
     # delete dialog
     show_delete: bool = False
@@ -77,6 +85,19 @@ class TaxonomyState(rx.State):
     @rx.var(cache=True)
     def categories(self) -> list[str]:
         return [row.name for row in self.rows]
+
+    @rx.var(cache=True)
+    def expense_rows(self) -> list[CategoryRow]:
+        return [r for r in self.rows if r.kind == KIND_EXPENSE]
+
+    @rx.var(cache=True)
+    def income_rows(self) -> list[CategoryRow]:
+        return [r for r in self.rows if r.kind == KIND_INCOME]
+
+    @rx.var(cache=True)
+    def picker_categories(self) -> list[str]:
+        """Categories a movement can be moved to: those of its kind, plus Otros."""
+        return [r.name for r in self.rows if r.kind == self.picker_kind or r.reserved]
 
     @rx.var(cache=True)
     def categories_and_unassigned(self) -> list[str]:
@@ -99,6 +120,7 @@ class TaxonomyState(rx.State):
             CategoryRow(
                 name=c.name,
                 description=c.description,
+                kind=c.kind,
                 color=category_color(c.name),
                 reserved=c.name == OTHERS,
                 subcategories=[
@@ -126,7 +148,11 @@ class TaxonomyState(rx.State):
     # ------------------------------------------------------------- add forms
     def add_category(self, form: dict):
         return self._apply(
-            lambda: db_manager.taxonomy.add_category(form.get("name", ""), form.get("description", "")),
+            lambda: db_manager.taxonomy.add_category(
+                form.get("name", ""),
+                form.get("description", ""),
+                KIND_BY_LABEL.get(form.get("kind", ""), KIND_EXPENSE),
+            ),
             "Categoría añadida",
         )
 
@@ -143,6 +169,7 @@ class TaxonomyState(rx.State):
         row = next((r for r in self.rows if r.name == name), None)
         self.edit_kind, self.edit_category, self.edit_original = "category", name, name
         self.edit_name, self.edit_description = name, row.description if row else ""
+        self.edit_type_label = KIND_LABELS.get(row.kind if row else KIND_EXPENSE, KIND_LABELS[KIND_EXPENSE])
         self.show_edit = True
 
     def open_edit_subcategory(self, category: str, name: str):
@@ -161,6 +188,10 @@ class TaxonomyState(rx.State):
         self.edit_description = value
 
     @rx.event
+    def set_edit_type_label(self, value: str):
+        self.edit_type_label = value
+
+    @rx.event
     def set_show_edit(self, value: bool):
         self.show_edit = value
 
@@ -169,7 +200,12 @@ class TaxonomyState(rx.State):
         name, description = self.edit_name, self.edit_description
         if kind == "category":
             result = self._apply(
-                lambda: db_manager.taxonomy.update_category(original, new_name=name, description=description),
+                lambda: db_manager.taxonomy.update_category(
+                    original,
+                    new_name=name,
+                    description=description,
+                    kind=None if original == OTHERS else KIND_BY_LABEL.get(self.edit_type_label),
+                ),
                 "Categoría actualizada",
             )
         else:
@@ -220,7 +256,8 @@ class TaxonomyState(rx.State):
         return self._apply(db_manager.taxonomy.reset_to_defaults, "Categorías originales restauradas")
 
     # --------------------------------------------------------------- picker
-    def open_picker(self, category: str | None, subcategory: str | None):
+    def open_picker(self, category: str | None, subcategory: str | None, is_expense: bool = True):
+        self.picker_kind = KIND_EXPENSE if is_expense else KIND_INCOME
         self.picker_category = category or ""
         self.picker_subcategory = subcategory or NO_SUBCATEGORY
 

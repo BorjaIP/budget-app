@@ -15,9 +15,11 @@ from dashboard.taxonomy import (
     OTHERS,
     OTHERS_SUB,
     CategoryEntry,
+    KIND_EXPENSE,
     SubEntry,
     Taxonomy,
     clean_description,
+    clean_kind,
     clean_name,
     default_taxonomy,
 )
@@ -47,14 +49,16 @@ class TaxonomyRepository:
         for sub in session.exec(select(Subcategory).order_by(Subcategory.position, Subcategory.id)).all():
             subs.setdefault(sub.category, []).append(SubEntry(sub.name, sub.description))
         return [
-            CategoryEntry(c.name, c.description, subs.get(c.name, []))
+            CategoryEntry(c.name, c.description, subs.get(c.name, []), c.kind or KIND_EXPENSE)
             for c in session.exec(select(Category).order_by(Category.position, Category.name)).all()
         ]
 
     @staticmethod
     def _write(session: Session, taxonomy: Taxonomy) -> None:
         for position, category in enumerate(taxonomy):
-            session.add(Category(name=category.name, description=category.description, position=position))
+            session.add(
+                Category(name=category.name, description=category.description, position=position, kind=category.kind)
+            )
             for sub_position, sub in enumerate(category.subcategories):
                 session.add(
                     Subcategory(
@@ -63,14 +67,14 @@ class TaxonomyRepository:
                 )
 
     # ------------------------------------------------------------------ add
-    def add_category(self, name: str, description: str = "") -> None:
-        name, description = clean_name(name), clean_description(description)
+    def add_category(self, name: str, description: str = "", kind: str = KIND_EXPENSE) -> None:
+        name, description, kind = clean_name(name), clean_description(description), clean_kind(kind)
         with self._session() as session:
             self._ensure_seeded(session)
             if self._category(session, name) is not None:
                 raise TaxonomyError(f"Ya existe la categoría «{name}»")
             position = session.exec(select(func.coalesce(func.max(Category.position), -1))).one() + 1
-            session.add(Category(name=name, description=description, position=position))
+            session.add(Category(name=name, description=description, position=position, kind=kind))
             session.commit()
 
     def add_subcategory(self, category: str, name: str, description: str = "") -> None:
@@ -91,8 +95,10 @@ class TaxonomyRepository:
             session.commit()
 
     # --------------------------------------------------------------- update
-    def update_category(self, name: str, new_name: str | None = None, description: str | None = None) -> int:
-        """Rename and/or describe a category. Returns how many expenses followed a rename."""
+    def update_category(
+        self, name: str, new_name: str | None = None, description: str | None = None, kind: str | None = None
+    ) -> int:
+        """Rename, describe and/or retype a category. Returns how many expenses followed a rename."""
         with self._session() as session:
             self._ensure_seeded(session)
             category = self._category(session, name)
@@ -100,6 +106,10 @@ class TaxonomyRepository:
                 raise TaxonomyError(f"No existe la categoría «{name}»")
             if description is not None:
                 category.description = clean_description(description)
+            if kind is not None and clean_kind(kind) != category.kind:
+                if name == OTHERS:
+                    raise TaxonomyError(f"«{OTHERS}» sirve para gastos e ingresos y no tiene tipo")
+                category.kind = kind
             moved = 0
             if new_name is not None and clean_name(new_name) != name:
                 new_name = clean_name(new_name)
@@ -241,7 +251,11 @@ class TaxonomyRepository:
         if budget is not None:  # the category name is the budget's primary key
             session.add(CategoryBudget(category=new_name, monthly_limit=budget.monthly_limit))
             session.delete(budget)
-        session.add(Category(name=new_name, description=category.description, position=category.position))
+        session.add(
+            Category(
+                name=new_name, description=category.description, position=category.position, kind=category.kind
+            )
+        )
         session.delete(category)
         session.flush()
         return moved

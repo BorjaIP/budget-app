@@ -44,7 +44,7 @@ def category_badge(item: Item) -> rx.Component:
             align="start",
             max_width="320px",
         ),
-        on_open_change=lambda _: TaxonomyState.open_picker(item.category, item.subcategory),
+        on_open_change=lambda _: TaxonomyState.open_picker(item.category, item.subcategory, item.is_expense),
     )
 
 
@@ -52,7 +52,7 @@ def _category_picker(item: Item) -> rx.Component:
     return rx.vstack(
         rx.text("Categoría", size="2", weight="medium"),
         rx.select(
-            TaxonomyState.categories,
+            TaxonomyState.picker_categories,
             value=TaxonomyState.picker_category,
             on_change=TaxonomyState.set_picker_category,
             size="2",

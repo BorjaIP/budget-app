@@ -8,6 +8,7 @@ from sqlmodel import Session, SQLModel, asc, create_engine, desc, select
 
 from dashboard.config import settings
 from dashboard.llm.merchant import merchant_key
+from dashboard.taxonomy import DEFAULT_INCOME_CATEGORIES
 
 from .models import CategoryBudget, Expense, ExpenseCreate, MerchantLabel
 from .taxonomy_repository import TaxonomyRepository
@@ -45,22 +46,35 @@ class DatabaseManager:
     def create_tables(self) -> None:
         SQLModel.metadata.create_all(self.engine)
 
-    # Columns added after the first release: name -> SQL type. `create_all` only creates missing
-    # tables, and this repo has no Alembic, so add them to existing tables here (SQLite and PostgreSQL).
-    _ADDED_COLUMNS = {"category_source": "TEXT", "category_confidence": "FLOAT"}
+    # Columns added after the first release: table -> {column: SQL type and default}. `create_all` only creates
+    # missing tables, and this repo has no Alembic, so add them to existing tables here (SQLite and PostgreSQL).
+    _ADDED_COLUMNS = {
+        "expense": {"category_source": "TEXT", "category_confidence": "FLOAT"},
+        "category": {"kind": "TEXT DEFAULT 'expense'"},
+    }
 
     def _migrate_schema(self) -> None:
         """Guarded, additive migration: add the columns an older database does not have yet."""
-        table_name = Expense.__tablename__
-        existing = {col["name"] for col in inspect(self.engine).get_columns(table_name)}
-        if not existing:
-            return  # fresh database: create_all already built the full table
-        missing = {name: sql for name, sql in self._ADDED_COLUMNS.items() if name not in existing}
-        if not missing:
-            return
-        with self.engine.begin() as conn:
-            for name, sql in missing.items():
-                conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {name} {sql}"))
+        inspector = inspect(self.engine)
+        for table_name, columns in self._ADDED_COLUMNS.items():
+            existing = {col["name"] for col in inspector.get_columns(table_name)}
+            if not existing:
+                continue  # fresh database: create_all already built the full table
+            missing = {name: sql for name, sql in columns.items() if name not in existing}
+            with self.engine.begin() as conn:
+                for name, sql in missing.items():
+                    conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {name} {sql}"))
+                if table_name == "category" and "kind" in missing:
+                    # Databases from before income categories get the default one once.
+                    for name in DEFAULT_INCOME_CATEGORIES:
+                        conn.execute(
+                            text(
+                                "INSERT INTO category (name, description, position, kind) "
+                                "SELECT :name, '', COALESCE(MAX(position), -1) + 1, 'income' FROM category "
+                                "WHERE NOT EXISTS (SELECT 1 FROM category WHERE name = :name)"
+                            ),
+                            {"name": name},
+                        )
 
     def get_session(self) -> Session:
         return Session(self.engine)
@@ -338,8 +352,8 @@ class DatabaseManager:
                 )
             ).all()
             for row in others:
-                if merchant_key(row.concept) != key:
-                    continue
+                if merchant_key(row.concept) != key or (row.amount > 0) != (expense.amount > 0):
+                    continue  # another merchant, or the other kind of movement (income vs expense)
                 row.category, row.subcategory = expense.category, expense.subcategory
                 row.is_categorized, row.category_source = True, "memory"
                 row.category_confidence = None

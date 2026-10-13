@@ -539,6 +539,7 @@ class TableState(rx.State):
         """
         from dashboard.llm.llm_call import categorize_with_confidence
         from dashboard.llm.retrieval import SimilarityIndex, confident_match
+        from dashboard.taxonomy import for_amount
         from dashboard.llm.run_stats import RunStats
 
         stats = RunStats()
@@ -564,8 +565,13 @@ class TableState(rx.State):
         assigned = 0
         for position, expense in enumerate(pending):
             started = time.perf_counter()
+            allowed = {c.name for c in for_amount(taxonomy, expense.amount)}  # income vs expense categories
             remembered = await asyncio.to_thread(db_manager.get_merchant_label, merchant_key(expense.concept))
+            if remembered and remembered["category"] not in allowed:
+                remembered = None
             match = None if remembered else confident_match(index.search(expense.concept, 3))
+            if match and match[1]["category"] not in allowed:
+                match = None
             if remembered:  # the user already taught the app this merchant: same answer every time
                 stats.record_memory()
                 await asyncio.to_thread(
@@ -582,7 +588,7 @@ class TableState(rx.State):
             else:
                 try:
                     category, subcategory, confidence = await categorize_with_confidence(
-                        expense.concept, taxonomy, labels=labels, index=index
+                        expense.concept, taxonomy, labels=labels, index=index, amount=expense.amount
                     )
                 except Exception:
                     stats.record_error()

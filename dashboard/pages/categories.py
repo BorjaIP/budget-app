@@ -5,7 +5,7 @@ import reflex as rx
 from ..components.card import card
 from ..components.icon import icon
 from ..components.page_header import page_header
-from ..taxonomy_state import CategoryRow, SubRow, TaxonomyState
+from ..taxonomy_state import KIND_LABELS, CategoryRow, SubRow, TaxonomyState
 from ..templates import template
 
 
@@ -99,6 +99,8 @@ def _new_category_form() -> rx.Component:
                 rx.input(name="description", placeholder="Qué incluye (opcional, ayuda al modelo)", size="2",
                          max_length=200, flex="2", min_width="16rem",
                          custom_attrs={"aria-label": "Descripción de la nueva categoría"}),
+                rx.select(list(KIND_LABELS.values()), name="kind", default_value=KIND_LABELS["expense"], size="2",
+                          custom_attrs={"aria-label": "Tipo de categoría"}),
                 rx.button("Añadir categoría", type="submit", size="2", color_scheme="gray", high_contrast=True),
                 gap="0.75rem",
                 wrap="wrap",
@@ -125,6 +127,17 @@ def _edit_dialog() -> rx.Component:
                 rx.text("Qué incluye (opcional)", size="2", weight="medium"),
                 rx.input(value=TaxonomyState.edit_description, on_change=TaxonomyState.set_edit_description,
                          max_length=200, size="2"),
+                rx.cond(
+                    TaxonomyState.edit_kind == "category",
+                    rx.vstack(
+                        rx.text("Tipo", size="2", weight="medium"),
+                        rx.select(list(KIND_LABELS.values()), value=TaxonomyState.edit_type_label,
+                                  on_change=TaxonomyState.set_edit_type_label, size="2"),
+                        spacing="2",
+                        width="100%",
+                        align="start",
+                    ),
+                ),
                 spacing="2",
                 width="100%",
                 margin_top="1rem",
@@ -204,7 +217,15 @@ def categories() -> rx.Component:
             ),
         ),
         _new_category_form(),
-        rx.vstack(rx.foreach(TaxonomyState.rows, _category_card), spacing="3", width="100%"),
+        rx.heading("Gastos", as_="h2", size="3", weight="medium", color=rx.color("gray", 11)),
+        rx.vstack(rx.foreach(TaxonomyState.expense_rows, _category_card), spacing="3", width="100%"),
+        rx.heading("Ingresos", as_="h2", size="3", weight="medium", color=rx.color("gray", 11)),
+        rx.text(
+            "Un movimiento con importe positivo solo se categoriza entre las categorías de ingresos (y Otros).",
+            size="2",
+            color=rx.color("gray", 11),
+        ),
+        rx.vstack(rx.foreach(TaxonomyState.income_rows, _category_card), spacing="3", width="100%"),
         _edit_dialog(),
         _delete_dialog(),
         _reset_dialog(),

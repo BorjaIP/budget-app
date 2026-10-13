@@ -2,7 +2,9 @@
 
 The taxonomy lives in the database (see `database/taxonomy_repository.py`) and can be edited by the user.
 `DEFAULT_TAXONOMY` is what a new database starts with and what "restore defaults" brings back.
-Expenses store a category and, optionally, a subcategory. Without a valid subcategory an expense belongs to its
+A category is either for expenses or for income, and a movement is classified among the categories of its own
+kind (the sign of its amount decides); Otros is available to both. Expenses store a category and, optionally,
+a subcategory. Without a valid subcategory an expense belongs to its
 parent category; without a valid category it belongs to Otros / General.
 """
 
@@ -11,6 +13,9 @@ from dataclasses import dataclass, field
 OTHERS = "Otros"
 OTHERS_SUB = "General"
 FALLBACK = (OTHERS, OTHERS_SUB)
+KIND_EXPENSE = "expense"
+KIND_INCOME = "income"
+DEFAULT_INCOME_CATEGORIES = ["Nómina"]  # a new database starts with these income categories
 NO_SUBCATEGORY = "Sin subcategoría"  # option shown in pickers; stored as no subcategory
 MAX_NAME_LENGTH = 40
 MAX_DESCRIPTION_LENGTH = 200
@@ -81,20 +86,40 @@ class CategoryEntry:
     name: str
     description: str = ""
     subcategories: list[SubEntry] = field(default_factory=list)
+    kind: str = KIND_EXPENSE
 
 
 Taxonomy = list[CategoryEntry]
 
 
 def default_taxonomy() -> Taxonomy:
-    return [
+    expenses = [
         CategoryEntry(name, subcategories=[SubEntry(sub) for sub in subs])
         for name, subs in DEFAULT_TAXONOMY.items()
     ]
+    income = [CategoryEntry(name, kind=KIND_INCOME) for name in DEFAULT_INCOME_CATEGORIES]
+    return [*expenses[:-1], *income, expenses[-1]]  # Otros stays last
 
 
-def category_names(taxonomy: Taxonomy) -> list[str]:
-    return [c.name for c in taxonomy]
+def category_names(taxonomy: Taxonomy, kind: str | None = None) -> list[str]:
+    """Names in order; with `kind`, only that kind (Otros, available to both, is always included)."""
+    return [c.name for c in taxonomy if kind is None or c.kind == kind or c.name == OTHERS]
+
+
+def kind_for_amount(amount: float) -> str:
+    return KIND_INCOME if amount > 0 else KIND_EXPENSE
+
+
+def for_amount(taxonomy: Taxonomy, amount: float) -> Taxonomy:
+    """The categories a movement of this amount can have: its own kind plus Otros."""
+    kind = kind_for_amount(amount)
+    return [c for c in taxonomy if c.kind == kind or c.name == OTHERS]
+
+
+def clean_kind(raw: str | None) -> str:
+    if raw not in (KIND_EXPENSE, KIND_INCOME):
+        raise ValueError("El tipo debe ser gasto o ingreso")
+    return raw
 
 
 def find_category(taxonomy: Taxonomy, name: str) -> CategoryEntry | None:

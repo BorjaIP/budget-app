@@ -65,6 +65,7 @@ class Category(SQLModel, table=True):
     name: str = Field(primary_key=True)
     description: str = Field(default="", description="What belongs here; sent to the model")
     position: int = Field(default=0)
+    kind: str = Field(default="expense", description="expense | income; the amount's sign picks the kind")
 
 
 class Subcategory(SQLModel, table=True):

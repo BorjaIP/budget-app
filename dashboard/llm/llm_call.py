@@ -14,7 +14,7 @@ from typing import Any
 import httpx
 
 from dashboard.config import settings
-from dashboard.taxonomy import FALLBACK, CategoryEntry, Taxonomy, find_category
+from dashboard.taxonomy import FALLBACK, CategoryEntry, Taxonomy, find_category, for_amount
 
 from .prompt import NONE_OPTION, STATIC_EXAMPLES, category_prompt, subcategory_prompt
 from .retrieval import SimilarityIndex
@@ -136,8 +136,12 @@ async def categorize_with_confidence(
     model: str = DEFAULT_MODEL,
     labels: list[dict[str, Any]] | None = None,
     index: SimilarityIndex | None = None,
+    amount: float | None = None,
 ) -> tuple[str, str | None, float | None]:
     """(category, subcategory or None, confidence) for a bank concept.
+
+    With `amount`, only the categories of its kind are offered: income categories for a positive amount,
+    expense categories otherwise (Otros is always available).
 
     Confidence is the product of the probability of each step. It is 0 when the model's answer could not be read
     and the result is the fallback (Otros / General).
@@ -145,6 +149,8 @@ async def categorize_with_confidence(
     labels = labels or []
     concept = concept[:MAX_CONCEPT_LENGTH]
     started = time.perf_counter()
+    if amount is not None:
+        taxonomy = for_amount(taxonomy, amount)
     if not taxonomy:
         return FALLBACK[0], FALLBACK[1], 0.0
     full_taxonomy = taxonomy

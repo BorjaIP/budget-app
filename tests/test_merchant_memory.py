@@ -127,3 +127,20 @@ def test_review_queue_has_uncategorized_and_low_confidence_model_answers_only(tm
     assert manager.count_to_review() == 2
     rows, total = manager.get_expenses_paginated(review_only=True)
     assert total == 2 and {r.id for r in rows} == {ids[1], ids[4]}
+
+
+def test_a_correction_is_not_applied_to_the_other_kind_of_movement(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    manager = _manager(tmp_path)
+    manager.bulk_insert_with_dedupe(
+        [_expense(1, "Bizum Marta 1", -20.0), _expense(2, "Bizum Marta 2", -15.0), _expense(3, "Bizum Marta 3", 30.0)]
+    )
+    rows = sorted(manager.get_all_expenses(), key=lambda e: e.operation_date)
+    manager.update_category(rows[0].id, "Gastos diarios", "Comida", source="manual")
+
+    changed = manager.learn_from_correction(rows[0].id)
+
+    by_id = {e.id: e for e in manager.get_all_expenses()}
+    assert changed == 1
+    assert by_id[rows[1].id].category == "Gastos diarios"
+    assert by_id[rows[2].id].category is None  # the incoming Bizum is income

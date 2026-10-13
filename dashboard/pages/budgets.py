@@ -45,7 +45,7 @@ class BudgetState(rx.State):
             }
             self.recurring = find_recurring(db_manager.get_all_expenses())
             self.recurring_total_fmt = _money(sum(r.amount for r in self.recurring))
-            self.rows = build_rows(category_names(db_manager.taxonomy.load()), db_manager.get_budgets(), spending)
+            self.rows = build_rows(category_names(db_manager.taxonomy.load(), "expense"), db_manager.get_budgets(), spending)
         except Exception:
             logger.exception("Could not load the budgets")
             self.load_error = True

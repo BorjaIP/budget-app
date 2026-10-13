@@ -81,6 +81,24 @@ The Reflex app is configured in `rxconfig.py` with `app_name="dashboard"`. Entry
 
 No VPN container is part of the stack.
 
+## UI conventions
+
+Minimalist look: warm sand grays, a neutral accent, 1px hairline borders, no shadows or gradients,
+Geist (self-hosted in `assets/fonts`), sentence case and no emojis.
+
+- Reuse the shared pieces: `components/card.py` (surface), `page_header.py`, `empty_state.py`,
+  `notice.py` (inline error with retry) and `icon.py` (Radix Icons; do not use `rx.icon`, it renders Lucide).
+- Money and counters use `class_name="num"` (tabular digits) and are right-aligned in tables. Color is
+  semantic only: green for income and positive savings, red for negative savings and errors.
+- Icon-only controls and inputs without a visible label need an accessible name
+  (`custom_attrs={"aria-label": ...}`); active navigation sets `aria-current`.
+- Loading uses skeletons. Failures are logged with `logging` and shown as `error_notice`; raw exceptions
+  never reach the user.
+- Reflex 0.10 specifics: `set_<var>` setters are not generated (declare them), responsive enum props use
+  `rx.breakpoints(...)`, and decorated pages must be imported in `dashboard/dashboard.py`.
+- Check changes with `scripts/ui_preview.sh` (desktop and mobile, light and dark) and keep
+  `tests/test_app_compiles.py` green; an HTTP 200 from the dev server does not prove a page exists.
+
 ## Conventions
 
 - Conventional Commits. Never stage unrelated work: add explicit paths, not `git add -A`.

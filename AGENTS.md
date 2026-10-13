@@ -4,7 +4,7 @@ Guidance for AI coding agents (Claude Code, Codex, and others) working in this r
 
 ## Project Overview
 
-Personal budget/expense management app built with **Reflex** (Python full-stack framework that compiles to React). Uses SQLite for storage, SQLModel as ORM, and a **local** Ollama model for expense categorization (no data leaves the machine).
+Personal budget/expense management app built with **Reflex** (Python full-stack framework that compiles to React). Uses SQLModel as ORM over SQLite (local development) or PostgreSQL (Docker), and a **local** Ollama model for expense categorization (no data leaves the machine).
 
 ## Sensitive data (HARD RULE)
 
@@ -17,12 +17,13 @@ Personal budget/expense management app built with **Reflex** (Python full-stack 
   ask the owner for the schema. The code-level schema lives in `dashboard/database/models.py` and
   `dashboard/utils/file_reader.py`.
 - Tests and examples use synthetic data created in temporary directories, never the real `data/`.
-  `dashboard/database/operations.py` creates `db_manager` at import time, which opens
-  `data/expenses.db` relative to the cwd: tests must `monkeypatch.chdir(tmp_path)` before importing it.
+  `dashboard/database/operations.py` creates `db_manager` at import time and opens the database lazily on
+  first use (`data/expenses.db`, relative to the cwd, for the default SQLite URL): tests must
+  `monkeypatch.chdir(tmp_path)` before touching it.
 - A script that must run against real data prints aggregates only (counts, percentages, timings),
   never concept text, amounts or dates of individual rows.
-- `.env` holds VPN credentials: never read, print or commit it. Validate the compose file with
-  `docker compose ... config --quiet`; plain `config` prints interpolated secrets.
+- `.env` may hold credentials and settings overrides: never read, print or commit it. Validate the compose
+  file with `docker compose ... config --quiet`; plain `config` prints interpolated values.
 
 ## Commands
 
@@ -32,7 +33,7 @@ Dependencies are managed with **uv** only. `pyproject.toml` + `uv.lock` are the 
 ```bash
 make install      # uv sync (creates/updates .venv)
 make up           # install + run the Reflex dev server (hot reload) inside .venv
-make docker-up    # build and start the full stack (app + Ollama + VPN)
+make docker-up    # build and start the full stack (app + Ollama + PostgreSQL)
 make docker-down  # stop the stack
 
 uv run pytest tests/ -q          # unit tests (synthetic data only)
@@ -53,15 +54,16 @@ The Reflex app is configured in `rxconfig.py` with `app_name="dashboard"`. Entry
 
 - **Pages** (`pages/`): route handlers. The expenses page is at `expenses/page.py` → `/expenses`.
 - **State** (`expenses/state.py`): `TableState`, the Reflex reactive state for pagination, filtering, sorting, uploads, categorization and database access.
-- **Database** (`database/`): `DatabaseManager` in `operations.py` wraps SQLModel/SQLite. `models.py` defines the `Expense` table. The database file lives in `data/expenses.db`. Schema changes on existing databases go through the additive guarded migration in `DatabaseManager._migrate_schema` (there is no Alembic).
+- **Config** (`config.py`): `Settings` (pydantic-settings) reads environment variables and `.env`: `DATABASE_URL` (default `sqlite:///data/expenses.db`; PostgreSQL in Docker), `OLLAMA_BASE_URL`, `uploaded_files_dir`.
+- **Database** (`database/`): `DatabaseManager` in `operations.py` wraps SQLModel and creates its engine lazily from `settings.database_url`. `models.py` defines the `Expense` table. Schema changes on existing SQLite databases go through the additive guarded migration in `DatabaseManager._migrate_schema` (SQLite only; there is no Alembic).
 - **File processing** (`utils/`): `FileReader` parses uploaded `.xls`/`.xlsx` bank exports with Pandas (`xlrd` for `.xls`, `openpyxl` for `.xlsx`). `FileProcessor` handles the upload-to-database pipeline with deduplication.
-- **LLM** (`llm/`): `llm_call.py` calls Ollama (default model `qwen2.5:3b-instruct`) at `OLLAMA_BASE_URL` (default `http://localhost:11434`). The prompt (`prompt.py`) asks for `[Category][Subcategory]`; few-shot examples come from rows the user tagged by hand (`category_source = "manual"`), falling back to static examples. `CATEGORY_TAXONOMY` is reviewed by the owner: **never change its categories or subcategories**.
+- **LLM** (`llm/`): `llm_call.py` calls Ollama (default model `qwen2.5:3b-instruct`) at `settings.ollama_base_url` (env `OLLAMA_BASE_URL`, default `http://localhost:11434`). The prompt (`prompt.py`) asks for `[Category][Subcategory]`; few-shot examples come from rows the user tagged by hand (`category_source = "manual"`), falling back to static examples. `CATEGORY_TAXONOMY` is reviewed by the owner: **never change its categories or subcategories**.
 - **UI components** (`components/`), **templates** (`templates/template.py`), **styles** (`styles.py`, Radix UI theme).
 
 ### Data flow
 
 1. User uploads an Excel file → `FileProcessor` validates and reads it via `FileReader`.
-2. Parsed expenses are inserted into SQLite via `DatabaseManager` (deduplicated by hash).
+2. Parsed expenses are inserted into the configured database via `DatabaseManager` (deduplicated by hash).
 3. `TableState` loads from the database and renders the expense table.
 4. The "Recategorizar" button resets non-manual rows and sends them to the local Ollama model; manual tags are preserved and feed the few-shot prompt.
 
@@ -69,12 +71,12 @@ The Reflex app is configured in `rxconfig.py` with `app_name="dashboard"`. Entry
 
 `docker/docker-compose.yaml` runs:
 
-- **gluetun**: VPN container (Private Internet Access); Ollama shares its network namespace, so other containers reach Ollama at `gluetun:11434`.
-- **ollama**: LLM inference with NVIDIA GPU support (image `latest`).
-- **model-pull**: one-shot job that pulls the categorization model, retrying until the VPN is up.
-- **app**: this application (`Dockerfile`), ports 3000/8000, with `data/` mounted at `/app/data`.
+- **ollama**: LLM inference with NVIDIA GPU support (image `latest`), port 11434 published on the host.
+- **model-pull**: one-shot job that pulls the categorization model from the Ollama registry, retrying until it succeeds.
+- **postgres**: PostgreSQL 17 for the app, reachable only on the compose network (development credentials live in the compose file).
+- **app**: this application (`Dockerfile`), ports 3000/8000, configured with `DATABASE_URL` and `OLLAMA_BASE_URL`; uploads are mounted from `data/uploaded_files`.
 
-Requires `.env` with `OPENVPN_USER` and `OPENVPN_PASSWORD`.
+No VPN container is part of the stack.
 
 ## Conventions
 

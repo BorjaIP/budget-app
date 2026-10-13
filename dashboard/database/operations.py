@@ -8,7 +8,12 @@ from sqlmodel import Session, SQLModel, asc, create_engine, desc, select
 
 from dashboard.config import settings
 from dashboard.llm.merchant import merchant_key
-from dashboard.taxonomy import DEFAULT_INCOME_CATEGORIES
+from dashboard.taxonomy import (
+    DEFAULT_DESCRIPTIONS,
+    DEFAULT_INCOME_CATEGORIES,
+    DEFAULT_SAVING_CATEGORIES,
+    KIND_SAVING,
+)
 
 from .models import CategoryBudget, Expense, ExpenseCreate, MerchantLabel
 from .taxonomy_repository import TaxonomyRepository
@@ -41,6 +46,7 @@ class DatabaseManager:
             self._engine = create_engine(self.database_url)
             SQLModel.metadata.create_all(self._engine)
             self._migrate_schema()
+            self._apply_one_time_updates()
         return self._engine
 
     def create_tables(self) -> None:
@@ -76,6 +82,40 @@ class DatabaseManager:
                             {"name": name},
                         )
 
+    def _apply_one_time_updates(self) -> None:
+        """Data changes that older databases get once: default descriptions and the saving category.
+
+        A flag keeps them from coming back after the user edits or deletes what they added.
+        """
+        with self.engine.begin() as conn:
+            if conn.execute(text("SELECT value FROM appsetting WHERE key = 'defaults_v2'")).first():
+                return
+            if conn.execute(text("SELECT COUNT(*) FROM category")).scalar():
+                for name, description in DEFAULT_DESCRIPTIONS.items():
+                    conn.execute(
+                        text("UPDATE category SET description = :d WHERE name = :n AND (description IS NULL OR description = '')"),
+                        {"d": description, "n": name},
+                    )
+                for name, subs in DEFAULT_SAVING_CATEGORIES.items():
+                    conn.execute(
+                        text(
+                            "INSERT INTO category (name, description, position, kind) "
+                            "SELECT :n, :d, COALESCE(MAX(position), -1) + 1, :k FROM category "
+                            "WHERE NOT EXISTS (SELECT 1 FROM category WHERE name = :n)"
+                        ),
+                        {"n": name, "d": DEFAULT_DESCRIPTIONS.get(name, ""), "k": KIND_SAVING},
+                    )
+                    for position, sub in enumerate(subs):
+                        conn.execute(
+                            text(
+                                "INSERT INTO subcategory (category, name, description, position) "
+                                "SELECT :c, :n, '', :p WHERE NOT EXISTS "
+                                "(SELECT 1 FROM subcategory WHERE category = :c AND name = :n)"
+                            ),
+                            {"c": name, "n": sub, "p": position},
+                        )
+            conn.execute(text("INSERT INTO appsetting (key, value) VALUES ('defaults_v2', '1')"))
+
     def get_session(self) -> Session:
         return Session(self.engine)
 
@@ -110,9 +150,35 @@ class DatabaseManager:
             session.commit()
             return {"inserted": inserted, "skipped": skipped}
 
-    def get_all_expenses(self, limit: int | None = None) -> list[Expense]:
+    def saving_category_names(self) -> set[str]:
+        """Categories whose movements are transfers to accounts the app does not see."""
+        return {c.name for c in self.taxonomy.load() if c.kind == KIND_SAVING}  # load() seeds a fresh database
+
+    def _without_saving(self, statement, saving: set[str] | None = None):
+        """Leave transfers to savings out of a spending/income aggregation."""
+        names = self.saving_category_names() if saving is None else saving
+        if not names:
+            return statement
+        return statement.where(or_(Expense.category.is_(None), Expense.category.not_in(names)))  # type: ignore[union-attr]
+
+    def get_saving_transfers(self, date_from: str | None = None, date_to: str | None = None) -> float:
+        """Net amount moved to savings in the range: positive when more went out than came back."""
+        names = self.saving_category_names()
+        if not names:
+            return 0.0
+        with self.get_session() as session:
+            statement = select(Expense.amount).where(Expense.category.in_(names))  # type: ignore[union-attr]
+            if date_from:
+                statement = statement.where(Expense.operation_date >= date_from)
+            if date_to:
+                statement = statement.where(Expense.operation_date <= date_to)
+            return round(-sum(session.exec(statement).all()), 2)
+
+    def get_all_expenses(self, limit: int | None = None, exclude_saving: bool = False) -> list[Expense]:
         with self.get_session() as session:
             statement = select(Expense).order_by(desc(Expense.operation_date), desc(Expense.id))
+            if exclude_saving:
+                statement = self._without_saving(statement)
             if limit:
                 statement = statement.limit(limit)
             return list(session.exec(statement).all())
@@ -455,7 +521,7 @@ class DatabaseManager:
     ) -> list[dict[str, Any]]:
         """Aggregate spending (negative amounts) by category. Returns sorted list."""
         with self.get_session() as session:
-            statement = select(Expense).where(Expense.amount < 0)
+            statement = self._without_saving(select(Expense).where(Expense.amount < 0))
             if date_from:
                 statement = statement.where(Expense.operation_date >= date_from)
             if date_to:
@@ -481,7 +547,7 @@ class DatabaseManager:
         date_to: str | None = None,
     ) -> list[dict[str, Any]]:
         with self.get_session() as session:
-            statement = select(Expense).where(Expense.amount < 0)
+            statement = self._without_saving(select(Expense).where(Expense.amount < 0))
             if date_from:
                 statement = statement.where(Expense.operation_date >= date_from)
             if date_to:
@@ -517,9 +583,12 @@ class DatabaseManager:
         return sorted(years, reverse=True)
 
     def get_yearly_summary(self) -> list[dict[str, Any]]:
-        """Aggregate ingresos/gastos/ahorro per calendar year."""
+        """Aggregate income, spending and savings (income minus spending) per calendar year.
+
+        Transfers to saving categories are neither income nor spending.
+        """
         with self.get_session() as session:
-            rows = session.exec(select(Expense)).all()
+            rows = session.exec(self._without_saving(select(Expense))).all()
 
         totals: dict[str, dict[str, float]] = defaultdict(lambda: {"income": 0.0, "spending": 0.0})
         for row in rows:
@@ -551,7 +620,7 @@ class DatabaseManager:
     ) -> dict[str, float]:
         """Total income and spending (positive numbers) within an optional date range."""
         with self.get_session() as session:
-            statement = select(Expense.amount)
+            statement = self._without_saving(select(Expense.amount))
             if date_from:
                 statement = statement.where(Expense.operation_date >= date_from)
             if date_to:

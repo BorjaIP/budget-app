@@ -7,7 +7,7 @@ import reflex as rx
 
 from dashboard.database.operations import db_manager
 from dashboard.database.taxonomy_repository import TaxonomyError
-from dashboard.taxonomy import FALLBACK, KIND_EXPENSE, KIND_INCOME, NO_SUBCATEGORY, OTHERS
+from dashboard.taxonomy import FALLBACK, KIND_EXPENSE, KIND_INCOME, KIND_SAVING, NO_SUBCATEGORY, OTHERS
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ class SubRow(pydantic.BaseModel):
     reserved: bool = False
 
 
-KIND_LABELS = {KIND_EXPENSE: "Gasto", KIND_INCOME: "Ingreso"}
+KIND_LABELS = {KIND_EXPENSE: "Gasto", KIND_INCOME: "Ingreso", KIND_SAVING: "Ahorro"}
 KIND_BY_LABEL = {label: kind for kind, label in KIND_LABELS.items()}
 
 
@@ -95,9 +95,13 @@ class TaxonomyState(rx.State):
         return [r for r in self.rows if r.kind == KIND_INCOME]
 
     @rx.var(cache=True)
+    def saving_rows(self) -> list[CategoryRow]:
+        return [r for r in self.rows if r.kind == KIND_SAVING]
+
+    @rx.var(cache=True)
     def picker_categories(self) -> list[str]:
-        """Categories a movement can be moved to: those of its kind, plus Otros."""
-        return [r.name for r in self.rows if r.kind == self.picker_kind or r.reserved]
+        """Categories a movement can be moved to: those of its kind, the saving ones and Otros."""
+        return [r.name for r in self.rows if r.kind in (self.picker_kind, KIND_SAVING) or r.reserved]
 
     @rx.var(cache=True)
     def categories_and_unassigned(self) -> list[str]:

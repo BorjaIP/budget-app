@@ -45,7 +45,7 @@ def budget_stats_cards() -> rx.Component:
         ),
         _stat("Ingresos", StatsState.total_income_fmt, rx.color("green", 11), StatsState.income_delta),
         _stat("Gastos", StatsState.total_spending_fmt, rx.color("red", 11), StatsState.spending_delta),
-        _stat("Tasa de ahorro", StatsState.savings_rate_fmt),
+        _stat("Tasa de ahorro", StatsState.savings_rate_fmt, delta_var=StatsState.saved_note),
         gap="1px",
         grid_template_columns=[
             "repeat(2, 1fr)",

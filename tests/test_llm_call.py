@@ -111,13 +111,13 @@ def test_the_prompt_size_grows_with_names_not_with_every_subcategory():
     assert "Sub 3-4" not in prompt and len(prompt) < 4000
 
 
-def test_a_positive_amount_is_only_offered_income_categories_and_otros(monkeypatch):
+def test_a_positive_amount_is_offered_income_and_saving_categories_and_otros(monkeypatch):
     calls = _fake_model(monkeypatch, [_answer("category", "Nómina", 0.9)])
 
     result = asyncio.run(categorize_with_confidence("Transferencia Empresa Faro", default_taxonomy(), amount=2100.0))
 
     assert result[:2] == ("Nómina", None)
-    assert calls[0]["schema"]["properties"]["category"]["enum"] == ["Nómina", "Otros"]
+    assert calls[0]["schema"]["properties"]["category"]["enum"] == ["Nómina", "Ahorro", "Otros"]
 
 
 def test_a_negative_amount_is_never_offered_income_categories(monkeypatch):

@@ -168,8 +168,8 @@ def test_a_movement_can_only_have_categories_of_its_own_kind_plus_otros(tmp_path
     income_names = {c.name for c in for_amount(taxonomy, 2100.0)}
     expense_names = {c.name for c in for_amount(taxonomy, -20.0)}
 
-    assert income_names == {"Nómina", "Otros"}
-    assert "Nómina" not in expense_names and {"Ocio", "Otros"} <= expense_names
+    assert income_names == {"Nómina", "Ahorro", "Otros"}
+    assert "Nómina" not in expense_names and {"Ocio", "Ahorro", "Otros"} <= expense_names
 
 
 def test_an_old_database_gets_the_kind_column_and_the_default_income_category_once(tmp_path, monkeypatch):
@@ -192,5 +192,40 @@ def test_an_old_database_gets_the_kind_column_and_the_default_income_category_on
     manager2 = DatabaseManager(database_url=f"sqlite:///{db}")  # restart: must not come back
     second = {c.name: c.kind for c in manager2.taxonomy.load()}
 
-    assert first == {"Ocio": "expense", "Otros": "expense", "Nómina": "income"}
+    assert first == {"Ocio": "expense", "Otros": "expense", "Nómina": "income", "Ahorro": "saving"}
     assert "Nómina" not in second
+
+
+def test_default_descriptions_are_filled_once_on_an_old_database_and_never_again(tmp_path, monkeypatch):
+    import sqlite3
+
+    monkeypatch.chdir(tmp_path)
+    db = tmp_path / "expenses.db"
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE TABLE category (name TEXT PRIMARY KEY, description TEXT, position INTEGER, kind TEXT DEFAULT 'expense')")
+    conn.execute("CREATE TABLE subcategory (id INTEGER PRIMARY KEY, category TEXT, name TEXT, description TEXT, position INTEGER)")
+    conn.execute("INSERT INTO category VALUES ('Ocio', '', 0, 'expense')")
+    conn.execute("INSERT INTO category VALUES ('Vivienda', 'mi texto', 1, 'expense')")
+    conn.execute("INSERT INTO category VALUES ('Otros', '', 2, 'expense')")
+    conn.commit()
+    conn.close()
+    from dashboard.database.operations import DatabaseManager
+
+    manager = DatabaseManager(database_url=f"sqlite:///{db}")
+    first = {c.name: c for c in manager.taxonomy.load()}
+
+    assert first["Ocio"].description.startswith("Tiempo libre")
+    assert first["Vivienda"].description == "mi texto"  # never overwrite what the user wrote
+    assert [s.name for s in first["Ahorro"].subcategories] == ["Traspaso a cuenta de ahorro", "Retirada de ahorro"]
+
+    manager.taxonomy.update_category("Ocio", description="")  # the user clears it
+    manager2 = DatabaseManager(database_url=f"sqlite:///{db}")
+
+    assert {c.name: c for c in manager2.taxonomy.load()}["Ocio"].description == ""
+
+
+def test_a_new_database_starts_with_descriptions_and_the_saving_category(tmp_path, monkeypatch):
+    taxonomy = {c.name: c for c in _manager(tmp_path, monkeypatch).taxonomy.load()}
+
+    assert all(c.description for c in taxonomy.values())
+    assert taxonomy["Ahorro"].kind == "saving"

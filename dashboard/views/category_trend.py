@@ -24,7 +24,7 @@ class CategoryTrendState(rx.State):
         try:
             self.options = [ALL, *category_names(db_manager.taxonomy.load(), "expense"), UNCATEGORIZED]
             _, latest = db_manager.get_date_bounds()
-            self.data = monthly_category_totals(db_manager.get_all_expenses(), self.category, latest)
+            self.data = monthly_category_totals(db_manager.get_all_expenses(exclude_saving=True), self.category, latest)
         except Exception:
             logger.exception("Could not load the category trend")
             self.load_error = True

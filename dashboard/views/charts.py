@@ -47,6 +47,7 @@ class StatsState(rx.State):
     prev_spending: float | None = None
     review_count: int = 0
     latest_date: str = ""
+    saved_total: float = 0.0
     daily_mode: bool = False
     unusual: list[UnusualRow] = []
     data_range_label: str = ""
@@ -78,6 +79,7 @@ class StatsState(rx.State):
             period = resolve_period(self.period, max_date)
             date_from, date_to = period.date_from, period.date_to
             expenses = db_manager.get_all_expenses()
+            saving = db_manager.saving_category_names()  # transfers to savings are neither income nor spending
 
             # Daily buckets when a single month is selected, monthly otherwise
             # (a full year of daily points overlaps and becomes unreadable).
@@ -95,11 +97,12 @@ class StatsState(rx.State):
                 if date_to and op_date > date_to:
                     continue
                 bucket = op_date[:7] if monthly else op_date
-                if expense.amount > 0:
-                    income[bucket] += expense.amount
-                else:
-                    spending[bucket] += abs(expense.amount)
-                # expenses are ordered newest-first, so the first hit per
+                if expense.category not in saving:
+                    if expense.amount > 0:
+                        income[bucket] += expense.amount
+                    else:
+                        spending[bucket] += abs(expense.amount)
+                # transfers still count for the balance. Expenses are ordered newest-first, so the first hit per
                 # bucket is already its most recent balance.
                 if bucket not in balance:
                     balance[bucket] = expense.balance
@@ -123,7 +126,8 @@ class StatsState(rx.State):
             else:
                 self.prev_income = self.prev_spending = None
             self.review_count = db_manager.count_to_review()
-            self.unusual = find_unusual(expenses, max_date)
+            self.saved_total = db_manager.get_saving_transfers(date_from, date_to)
+            self.unusual = find_unusual([e for e in expenses if e.category not in saving], max_date)
 
             breakdown = db_manager.get_category_breakdown(date_from=date_from, date_to=date_to)
             breakdown_total = sum(row["value"] for row in breakdown) or 1.0
@@ -223,6 +227,15 @@ class StatsState(rx.State):
             f"La línea punteada marca el gasto medio por {unit}: {_format_currency(self.spending_avg)}. "
             f"El más alto fue {peak['date']} con {_format_currency(peak['spending'])}."
         )
+
+    @rx.var(cache=True)
+    def saved_note(self) -> str:
+        """What went to (or came back from) savings accounts the app does not see."""
+        if abs(self.saved_total) < 0.005:
+            return ""
+        if self.saved_total > 0:
+            return f"{_format_currency(self.saved_total)} traspasados a ahorro"
+        return f"{_format_currency(-self.saved_total)} recuperados de ahorro"
 
     @rx.var(cache=True)
     def income_delta(self) -> str:

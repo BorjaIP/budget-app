@@ -65,7 +65,7 @@ class Category(SQLModel, table=True):
     name: str = Field(primary_key=True)
     description: str = Field(default="", description="What belongs here; sent to the model")
     position: int = Field(default=0)
-    kind: str = Field(default="expense", description="expense | income; the amount's sign picks the kind")
+    kind: str = Field(default="expense", description="expense | income | saving; the amount's sign picks expense or income")
 
 
 class Subcategory(SQLModel, table=True):
@@ -76,3 +76,10 @@ class Subcategory(SQLModel, table=True):
     name: str
     description: str = Field(default="")
     position: int = Field(default=0)
+
+
+class AppSetting(SQLModel, table=True):
+    """Small key/value flags, for example which one-time data updates already ran."""
+
+    key: str = Field(primary_key=True)
+    value: str = ""

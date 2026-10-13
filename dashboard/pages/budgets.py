@@ -43,7 +43,7 @@ class BudgetState(rx.State):
                 row["name"]: row["value"]
                 for row in db_manager.get_category_breakdown(period.date_from, period.date_to)
             }
-            self.recurring = find_recurring(db_manager.get_all_expenses())
+            self.recurring = find_recurring(db_manager.get_all_expenses(exclude_saving=True))
             self.recurring_total_fmt = _money(sum(r.amount for r in self.recurring))
             self.rows = build_rows(category_names(db_manager.taxonomy.load(), "expense"), db_manager.get_budgets(), spending)
         except Exception:

@@ -223,11 +223,19 @@ def settings() -> rx.Component:
         rx.vstack(rx.foreach(TaxonomyState.expense_rows, _category_card), spacing="3", width="100%"),
         rx.heading("Ingresos", as_="h2", size="3", weight="medium", color=rx.color("gray", 11)),
         rx.text(
-            "Un movimiento con importe positivo solo se categoriza entre las categorías de ingresos (y Otros).",
+            "Un movimiento con importe positivo se categoriza entre las categorías de ingresos, las de ahorro y Otros.",
             size="2",
             color=rx.color("gray", 11),
         ),
         rx.vstack(rx.foreach(TaxonomyState.income_rows, _category_card), spacing="3", width="100%"),
+        rx.heading("Ahorro y traspasos", as_="h2", size="3", weight="medium", color=rx.color("gray", 11)),
+        rx.text(
+            "Para el dinero que pasas a otras cuentas que no están en la app (y el que vuelve). Estos movimientos "
+            "no cuentan como gasto ni como ingreso: se muestran aparte como traspasos a ahorro.",
+            size="2",
+            color=rx.color("gray", 11),
+        ),
+        rx.vstack(rx.foreach(TaxonomyState.saving_rows, _category_card), spacing="3", width="100%"),
         _edit_dialog(),
         _delete_dialog(),
         _reset_dialog(),

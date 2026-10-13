@@ -104,6 +104,15 @@ class TaxonomyState(rx.State):
         return [*self.categories, "Sin categorizar"]
 
     @rx.var(cache=True)
+    def picker_description(self) -> str:
+        """What the chosen category (or, if set, subcategory) includes, to help the user pick."""
+        row = next((r for r in self.rows if r.name == self.picker_category), None)
+        if row is None:
+            return ""
+        sub = next((s for s in row.subcategories if s.name == self.picker_subcategory), None)
+        return (sub.description if sub and sub.description else row.description) or ""
+
+    @rx.var(cache=True)
     def picker_subcategories(self) -> list[str]:
         row = next((r for r in self.rows if r.name == self.picker_category), None)
         return [NO_SUBCATEGORY, *(s.name for s in row.subcategories)] if row else [NO_SUBCATEGORY]

@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-EXPECTED_ROUTES = {"/", "/expenses", "/budgets", "/categories", "/settings"}
+EXPECTED_ROUTES = {"/", "/expenses", "/budgets", "/settings"}
 
 
 def _registered_routes(cwd: Path) -> set[str]:

@@ -66,8 +66,17 @@ def _category_picker(item: Item) -> rx.Component:
             size="2",
             width="100%",
         ),
+        rx.cond(
+            TaxonomyState.picker_description != "",
+            rx.text(
+                TaxonomyState.picker_description,
+                size="1",
+                color=rx.color("gray", 11),
+                style={"font_style": "italic"},
+            ),
+        ),
         rx.hstack(
-            rx.link("Gestionar categorías", href="/categories", size="1", underline="always"),
+            rx.link("Gestionar categorías", href="/settings", size="1", underline="always"),
             rx.spacer(),
             rx.popover.close(
                 rx.button(

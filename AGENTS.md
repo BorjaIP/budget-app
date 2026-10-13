@@ -11,7 +11,7 @@ Personal budget/expense management app built with **Reflex** (Python full-stack 
 - `data/` holds personal bank exports (`.xls`, `.xlsx`, `.csv`), the SQLite database and uploads.
   AI agents MUST NOT read, list, grep, open, copy, print or otherwise inspect anything inside `data/`,
   and MUST NOT paste its contents anywhere (logs, tests, fixtures, commits, prompts to other models).
-  Permission rules in `.claude/settings.json` enforce this for file tools. Do not work around them
+  Local permission rules in `.claude/settings.json` (not committed) enforce this for file tools. Do not work around them
   with the shell, `python`, `sqlite3`, `pandas`, etc.
 - Only the application and the owner's own scripts read `data/`. If you need to understand the data,
   ask the owner for the schema. The code-level schema lives in `dashboard/database/models.py` and

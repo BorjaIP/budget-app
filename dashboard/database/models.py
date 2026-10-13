@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Optional
 
 from pydantic import NaiveDatetime
+from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 
@@ -56,3 +57,21 @@ class MerchantLabel(SQLModel, table=True):
     sample_concept: str = Field(description="One real concept of this merchant, used as a prompt example")
     confirmations: int = Field(default=1, description="Times the user confirmed this label")
     updated_at: NaiveDatetime = Field(default_factory=datetime.now)
+
+
+class Category(SQLModel, table=True):
+    """A category of the user's taxonomy; expenses store its name."""
+
+    name: str = Field(primary_key=True)
+    description: str = Field(default="", description="What belongs here; sent to the model")
+    position: int = Field(default=0)
+
+
+class Subcategory(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("category", "name"),)
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    category: str = Field(index=True)
+    name: str
+    description: str = Field(default="")
+    position: int = Field(default=0)

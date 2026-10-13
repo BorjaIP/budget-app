@@ -10,6 +10,7 @@ from dashboard.config import settings
 from dashboard.llm.merchant import merchant_key
 
 from .models import CategoryBudget, Expense, ExpenseCreate, MerchantLabel
+from .taxonomy_repository import TaxonomyRepository
 
 
 SORTABLE_COLUMNS = {
@@ -26,6 +27,7 @@ class DatabaseManager:
     def __init__(self, database_url: str | None = None):
         self.database_url = database_url or settings.database_url
         self._engine = None
+        self.taxonomy = TaxonomyRepository(self.get_session)
 
     @property
     def engine(self):

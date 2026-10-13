@@ -47,6 +47,7 @@ class StatsState(rx.State):
     prev_gastos: float | None = None
     uncategorized_count: int = 0
     latest_date: str = ""
+    daily_mode: bool = False
     unusual: list[UnusualRow] = []
     data_range_label: str = ""
     chart_data: list[dict] = []
@@ -81,6 +82,7 @@ class StatsState(rx.State):
             # Daily buckets when a single month is selected, monthly otherwise
             # (a full year of daily points overlaps and becomes unreadable).
             monthly = not period.daily
+            self.daily_mode = period.daily
 
             ingresos: dict[str, float] = defaultdict(float)
             gastos: dict[str, float] = defaultdict(float)
@@ -200,6 +202,29 @@ class StatsState(rx.State):
         return f"{rate:.1f} %".replace(".", ",")
 
     @rx.var(cache=True)
+    def gastos_avg(self) -> float:
+        spent = [d["gastos"] for d in self.chart_data if d.get("gastos", 0) > 0]
+        return round(sum(spent) / len(spent), 2) if spent else 0.0
+
+    @rx.var(cache=True)
+    def gastos_avg_line(self) -> int:
+        """Whole euros: the reference line only accepts str or int."""
+        return round(self.gastos_avg)
+
+    @rx.var(cache=True)
+    def chart_summary(self) -> str:
+        """Text alternative for the income vs spending chart."""
+        spent = [d for d in self.chart_data if d.get("gastos", 0) > 0]
+        if not spent:
+            return ""
+        unit = "día" if self.daily_mode else "mes"
+        peak = max(spent, key=lambda d: d["gastos"])
+        return (
+            f"La línea punteada marca el gasto medio por {unit}: {_format_currency(self.gastos_avg)}. "
+            f"El más alto fue {peak['date']} con {_format_currency(peak['gastos'])}."
+        )
+
+    @rx.var(cache=True)
     def ingresos_delta(self) -> str:
         return _delta_label(self.total_ingresos, self.prev_ingresos)
 
@@ -226,6 +251,15 @@ class StatsState(rx.State):
         period = resolve_period(self.period, self.latest_date or None)
         return [
             TableState.drill_down(category, period.date_from or "", period.date_to or "", "expense"),
+            rx.redirect("/expenses"),
+        ]
+
+    @rx.event
+    def open_concept(self, concept: str):
+        """Jump to Gastos searching this concept within the current period."""
+        period = resolve_period(self.period, self.latest_date or None)
+        return [
+            TableState.drill_down_search(concept, period.date_from or "", period.date_to or ""),
             rx.redirect("/expenses"),
         ]
 
@@ -364,17 +398,31 @@ def ingresos_gastos_chart() -> rx.Component:
         rx.cond(
             StatsState.chart_data.length() == 0,
             _empty_chart_placeholder(),
-            rx.recharts.bar_chart(
-                _custom_tooltip(),
-                rx.recharts.cartesian_grid(horizontal=True, vertical=False),
-                rx.recharts.bar(name="Ingresos", data_key="ingresos", fill=rx.color("green", 9)),
-                rx.recharts.bar(name="Gastos", data_key="gastos", fill=rx.color("red", 9)),
-                _x_axis(),
-                _y_axis(),
-                rx.recharts.legend(icon_type="circle", icon_size=8),
-                data=StatsState.chart_data,
-                height=_CHART_HEIGHT,
-                bar_gap=2,
+            rx.vstack(
+                rx.box(
+                    rx.recharts.bar_chart(
+                        _custom_tooltip(),
+                        rx.recharts.cartesian_grid(horizontal=True, vertical=False),
+                        rx.recharts.bar(name="Ingresos", data_key="ingresos", fill=rx.color("green", 9)),
+                        rx.recharts.bar(name="Gastos", data_key="gastos", fill=rx.color("red", 9)),
+                        rx.recharts.reference_line(
+                            y=StatsState.gastos_avg_line,
+                            stroke=rx.color("gray", 10),
+                            stroke_dasharray="4 4",
+                        ),
+                        _x_axis(),
+                        _y_axis(),
+                        rx.recharts.legend(icon_type="circle", icon_size=8),
+                        data=StatsState.chart_data,
+                        height=_CHART_HEIGHT,
+                        bar_gap=2,
+                    ),
+                    width="100%",
+                    custom_attrs={"role": "img", "aria-label": "Ingresos y gastos por periodo. " + StatsState.chart_summary},
+                ),
+                rx.text(StatsState.chart_summary, size="1", color=rx.color("gray", 11)),
+                spacing="2",
+                width="100%",
             ),
         ),
     )

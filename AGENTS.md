@@ -100,6 +100,8 @@ Geist (self-hosted in `assets/fonts`), sentence case and no emojis.
 - The overview period (`dashboard/periods.py`: Mes, 3 meses, 12 meses, Año, Todo, or a year) is anchored on the
   newest date in the data; category rows and the "sin categorizar" notice drill down into Gastos via
   `TableState.drill_down`.
+- Charts follow the `data-visualization` skill: start bar axes at zero, give every chart a text alternative
+  (`chart_summary`), mark benchmarks (dashed average line) and do not rely on color alone (income carries a `+`).
 - Check changes with `scripts/ui_preview.sh` (desktop and mobile, light and dark) and keep
   `tests/test_app_compiles.py` green; an HTTP 200 from the dev server does not prove a page exists.
 

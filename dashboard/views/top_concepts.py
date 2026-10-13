@@ -6,7 +6,7 @@ _TRUNCATE = {"overflow": "hidden", "text_overflow": "ellipsis", "white_space": "
 
 
 def _row(item: ConceptRow) -> rx.Component:
-    return rx.hstack(
+    content = rx.hstack(
         rx.text(item.concept, size="2", flex="1", min_width="0", style=_TRUNCATE),
         rx.text(
             item.count,
@@ -29,6 +29,13 @@ def _row(item: ConceptRow) -> rx.Component:
         width="100%",
         padding_y="0.5em",
         border_bottom=f"1px solid {rx.color('gray', 4, True)}",
+    )
+    return rx.el.button(
+        content,
+        type="button",
+        on_click=StatsState.open_concept(item.concept),
+        title="Ver estos movimientos",
+        class_name="row-link",
     )
 
 

@@ -89,6 +89,16 @@ New columns on `expense` go through `DatabaseManager._ADDED_COLUMNS` (works on S
 `scripts/eval_similarity.py` measures similarity strategies on the owner's own labels (aggregates only).
 Background and references: `docs/categorization-strategy.md`.
 
+### Overview
+
+The overview (`pages/index.py`, `views/overview_cards.py`) is computed by pure functions so it can be tested:
+`overview.py` (donut and cash-flow SVG strings, pace series, category changes, summary sentences; every name that
+reaches an SVG is escaped) and `overview_data.py` (assembles them for `StatsState`). Transfers to saving categories
+never enter income or spending. `recurring.py` finds monthly charges, estimates the next one (bills that vary, like
+electricity, need the same day each month and four months of history) and lists what is still to come this month.
+The "Reglas" tab of Ajustes (`rules_state.py`, `views/rules_panel.py`) shows the learned merchant rules
+(`MerchantLabel`) and lets the user create, change and forget them (`DatabaseManager.save_rule/delete_rule`).
+
 ### Logging
 
 The `dashboard` logger writes to stdout (`docker logs budget-app`). At `INFO` a categorization run logs only
@@ -116,8 +126,9 @@ No VPN container is part of the stack.
 
 ## UI conventions
 
-Minimalist look: warm sand grays, a neutral accent, 1px hairline borders, no shadows or gradients,
-Geist (self-hosted in `assets/fonts`), sentence case and no emojis.
+Clean card look inspired by Sure (the Maybe fork): a soft gray page with white cards (`components/card.py`,
+radius 14 px, 1px hairline border, a barely visible shadow), neutral grays, a near-black primary button, rounded
+controls (theme radius `large`), Geist (self-hosted in `assets/fonts`), sentence case and no emojis.
 
 - Reuse the shared pieces: `components/card.py` (surface), `page_header.py`, `empty_state.py`,
   `notice.py` (inline error with retry) and `icon.py` (Radix Icons; do not use `rx.icon`, it renders Lucide).

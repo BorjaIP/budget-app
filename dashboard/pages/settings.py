@@ -5,7 +5,9 @@ import reflex as rx
 from ..components.card import card
 from ..components.icon import icon
 from ..components.page_header import page_header
+from ..rules_state import RulesState
 from ..taxonomy_state import KIND_LABELS, CategoryRow, SubRow, TaxonomyState
+from ..views.rules_panel import rules_panel
 from ..templates import template
 
 
@@ -203,20 +205,21 @@ def _reset_dialog() -> rx.Component:
     )
 
 
-@template(route="/settings", title="Ajustes")
-def settings() -> rx.Component:
+def _categories_tab() -> rx.Component:
     return rx.vstack(
-        page_header(
-            "Ajustes",
-            "Categorías y subcategorías con las que se etiqueta cada movimiento. El modelo local las usa para "
-            "categorizar; una descripción corta de lo que incluye cada una le ayuda a acertar.",
-            actions=rx.button(
-                "Restaurar originales",
-                variant="soft",
-                color_scheme="gray",
+        rx.flex(
+            rx.text(
+                "Una descripción corta de lo que incluye cada categoría ayuda al modelo a acertar.",
                 size="2",
-                on_click=TaxonomyState.set_show_reset(True),
+                color=rx.color("gray", 11),
             ),
+            rx.button("Restaurar originales", variant="soft", color_scheme="gray", size="2",
+                      on_click=TaxonomyState.set_show_reset(True)),
+            justify="between",
+            align="center",
+            gap="1rem",
+            wrap="wrap",
+            width="100%",
         ),
         _new_category_form(),
         rx.heading("Gastos", as_="h2", size="3", weight="medium", color=rx.color("gray", 11)),
@@ -240,5 +243,28 @@ def settings() -> rx.Component:
         _delete_dialog(),
         _reset_dialog(),
         spacing="6",
+        width="100%",
+    )
+
+
+@template(route="/settings", title="Ajustes", on_load=RulesState.load_rules)
+def settings() -> rx.Component:
+    return rx.vstack(
+        page_header(
+            "Ajustes",
+            "Las categorías con las que se etiqueta cada movimiento y lo que la app ha aprendido de tus correcciones. "
+            "El modelo local usa las categorías (y sus descripciones) para categorizar.",
+        ),
+        rx.tabs.root(
+            rx.tabs.list(
+                rx.tabs.trigger("Categorías", value="categories"),
+                rx.tabs.trigger("Reglas", value="rules"),
+            ),
+            rx.tabs.content(rx.box(_categories_tab(), padding_top="1.25rem"), value="categories"),
+            rx.tabs.content(rx.box(rules_panel(), padding_top="1.25rem"), value="rules"),
+            default_value="categories",
+            width="100%",
+        ),
+        spacing="5",
         width="100%",
     )

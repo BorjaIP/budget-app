@@ -24,12 +24,13 @@ def card(*children, title: str | None = None, subtitle: str | None = None, actio
                 margin_bottom="1rem",
             )
         ]
+    padding = props.pop("padding", ["1rem", "1.25rem", "1.5rem"])
     return rx.box(
         *header,
         *children,
         width="100%",
         min_width="0",
-        padding=["1rem", "1.25rem", "1.5rem"],
+        padding=padding,
         border=styles.border,
         border_radius=styles.card_radius,
         box_shadow=styles.card_shadow,

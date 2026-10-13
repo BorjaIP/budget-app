@@ -13,6 +13,8 @@ from dashboard.taxonomy import (
     DEFAULT_INCOME_CATEGORIES,
     DEFAULT_SAVING_CATEGORIES,
     KIND_SAVING,
+    for_amount,
+    normalize_pair,
 )
 
 from .models import CategoryBudget, Expense, ExpenseCreate, MerchantLabel
@@ -427,6 +429,82 @@ class DatabaseManager:
                 changed += 1
             session.commit()
             return changed
+
+    # ------------------------------------------------------------------
+    # Rules: the learned merchant labels, visible and editable by the user
+    # ------------------------------------------------------------------
+    def list_rules(self) -> list[dict[str, Any]]:
+        """Every rule, the most confirmed first."""
+        with self.get_session() as session:
+            rules = session.exec(select(MerchantLabel)).all()
+        rules.sort(key=lambda m: (-m.confirmations, m.merchant_key))
+        return [
+            {
+                "key": m.merchant_key,
+                "example": m.sample_concept,
+                "category": m.category,
+                "subcategory": m.subcategory,
+                "confirmations": m.confirmations,
+            }
+            for m in rules
+        ]
+
+    def save_rule(self, text: str, category: str, subcategory: str | None) -> tuple[str, int]:
+        """Create or change the rule for a merchant and apply it to its movements not tagged by hand.
+
+        `text` is any concept of the merchant. Returns (rule key, movements changed). Movements whose sign does not
+        fit the category's kind (an income for an expense category) are left alone.
+        """
+        taxonomy = self.taxonomy.load()
+        category, subcategory = normalize_pair(taxonomy, category, subcategory)
+        key = merchant_key(text)
+        if not key:
+            raise ValueError("Escribe parte del concepto del comercio")
+        with self.get_session() as session:
+            label = session.get(MerchantLabel, key)
+            if label is None:
+                session.add(
+                    MerchantLabel(
+                        merchant_key=key,
+                        category=category,
+                        subcategory=subcategory,
+                        sample_concept=text.strip(),
+                        confirmations=1,
+                    )
+                )
+            else:
+                label.category, label.subcategory, label.updated_at = category, subcategory, datetime.now()
+                session.add(label)
+            session.commit()
+            changed = 0
+            for row in session.exec(
+                select(Expense).where(or_(Expense.category_source.is_(None), Expense.category_source != "manual"))  # type: ignore[union-attr]
+            ).all():
+                allowed = {c.name for c in for_amount(taxonomy, row.amount)}
+                if merchant_key(row.concept) != key or category not in allowed:
+                    continue
+                row.category, row.subcategory = category, subcategory
+                row.is_categorized, row.category_source, row.category_confidence = True, "memory", None
+                session.add(row)
+                changed += 1
+            session.commit()
+        return key, changed
+
+    def delete_rule(self, key: str) -> int:
+        """Forget a rule. Movements it had categorized go back to review; hand-made ones stay as they are."""
+        with self.get_session() as session:
+            label = session.get(MerchantLabel, key)
+            if label is None:
+                return 0
+            session.delete(label)
+            reopened = 0
+            for row in session.exec(select(Expense).where(Expense.category_source == "memory")).all():
+                if merchant_key(row.concept) == key:
+                    row.category_source, row.category_confidence = "llm", 0.0  # unsure again: it shows up to review
+                    session.add(row)
+                    reopened += 1
+            session.commit()
+            return reopened
 
     def sync_merchant_memory(self) -> int:
         """Backfill the memory from hand-made categories that predate it. Returns labels added."""

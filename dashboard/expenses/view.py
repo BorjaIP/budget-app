@@ -1,5 +1,6 @@
 import reflex as rx
 
+from dashboard.components.card import card
 from dashboard.components.category_badge import category_badge
 from dashboard.taxonomy_state import TaxonomyState
 from dashboard.components.empty_state import empty_state
@@ -760,8 +761,7 @@ def _table_or_empty() -> rx.Component:
 
 def main_table() -> rx.Component:
     return rx.vstack(
-        _toolbar(),
-        _filters(),
+        card(rx.vstack(_toolbar(), _filters(), spacing="3", width="100%"), padding=["0.75rem", "1rem", "1rem"]),
         _bulk_bar(),
         _upload_modal(),
         _table_or_empty(),

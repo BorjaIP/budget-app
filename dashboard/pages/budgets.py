@@ -135,8 +135,16 @@ def _recurring_row(row: RecurringRow) -> rx.Component:
     return rx.table.row(
         rx.table.row_header_cell(row.concept),
         rx.table.cell(rx.text(row.months, class_name="num"), justify="end"),
-        rx.table.cell(rx.text(row.last_date_fmt, class_name="num"), justify="end"),
-        rx.table.cell(rx.text(row.amount_fmt, weight="medium", class_name="num"), justify="end"),
+        rx.table.cell(rx.text(row.next_date_fmt, class_name="num"), justify="end"),
+        rx.table.cell(
+            rx.text(
+                row.estimate_fmt,
+                weight="medium",
+                class_name="num",
+                title=rx.cond(row.variable, "Varía cada mes: " + row.range_fmt, "Importe fijo"),
+            ),
+            justify="end",
+        ),
     )
 
 
@@ -145,7 +153,7 @@ def _recurring_card() -> rx.Component:
         BudgetState.recurring.length() > 0,
         card(
             rx.text(
-                "Unos " + BudgetState.recurring_total_fmt + " al mes en cargos que se repiten.",
+                "Unos " + BudgetState.recurring_total_fmt + " al mes en cargos que se repiten. «≈» marca los que varían cada mes.",
                 size="2",
                 color=rx.color("gray", 11),
                 margin_bottom="0.75rem",
@@ -156,8 +164,8 @@ def _recurring_card() -> rx.Component:
                         rx.table.row(
                             rx.table.column_header_cell("Concepto"),
                             rx.table.column_header_cell("Meses", justify="end"),
-                            rx.table.column_header_cell("Último cargo", justify="end"),
-                            rx.table.column_header_cell("Importe", justify="end"),
+                            rx.table.column_header_cell("Próximo cargo", justify="end"),
+                            rx.table.column_header_cell("Estimado", justify="end"),
                         )
                     ),
                     rx.table.body(rx.foreach(BudgetState.recurring, _recurring_row)),

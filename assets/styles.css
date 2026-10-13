@@ -1,17 +1,62 @@
+@font-face {
+    font-family: "Geist";
+    src: url("/fonts/geist-latin-wght-normal.woff2") format("woff2");
+    font-weight: 100 900;
+    font-style: normal;
+    font-display: swap;
+}
+
+.radix-themes {
+    --default-font-family: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Helvetica Neue", sans-serif;
+    --heading-font-family: var(--default-font-family);
+}
+
 body {
     overflow-y: scroll;
 }
 
+/* Money and counters: digits keep a fixed width so columns line up. */
+.num {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+}
+
+/* Quiet feedback on interactive elements. */
+@media (prefers-reduced-motion: no-preference) {
+    .rt-Button,
+    .rt-IconButton,
+    a {
+        transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease,
+            transform 150ms ease, opacity 150ms ease;
+    }
+
+    .rt-Button:active,
+    .rt-IconButton:active {
+        transform: translateY(1px);
+    }
+}
+
+/* Charts: hairline grid, small neutral labels, no colored legend text. */
 .recharts-cartesian-grid-horizontal line {
-	stroke-dasharray: 0;
-	stroke-opacity: 0.6 !important;
-	stroke: var(--gray-7);
+    stroke-dasharray: 0;
+    stroke: var(--gray-a5) !important;
+    stroke-opacity: 1 !important;
 }
 
 .recharts-cartesian-grid-vertical line {
-	stroke-opacity: 0 !important;
+    stroke-opacity: 0 !important;
+}
+
+.recharts-cartesian-axis-tick-value {
+    font-size: 12px;
+    fill: var(--gray-11);
+}
+
+.recharts-legend-item-text {
+    color: var(--gray-11) !important;
+    font-size: 12px;
 }
 
 .rt-BaseTabList {
-	box-shadow: none;
+    box-shadow: none;
 }

@@ -1,31 +1,29 @@
-"""Desktop persistent sidebar with logo and primary navigation."""
+"""Desktop persistent sidebar with the wordmark and primary navigation."""
 
 import reflex as rx
 
 from .. import styles
-
-
-_ITEMS = [
-    ("/", "Resumen", "home"),
-    ("/expenses", "Gastos", "receipt"),
-    ("/settings", "Ajustes", "settings"),
-]
+from .nav_items import NAV_ITEMS
 
 
 def _header() -> rx.Component:
-    return rx.hstack(
-        rx.icon("wallet", size=24, color=rx.color("teal", 9)),
-        rx.heading("Mi Presupuesto", size="4", weight="bold"),
-        align="center",
-        width="100%",
-        padding="0.35em",
+    return rx.heading(
+        "Mi presupuesto",
+        size="4",
+        weight="medium",
+        letter_spacing="-0.01em",
+        padding="0.35em 0.6em",
         margin_bottom="1em",
     )
 
 
 def _footer() -> rx.Component:
     return rx.hstack(
-        rx.color_mode.button(style={"opacity": "0.8", "scale": "0.95"}),
+        rx.color_mode.button(
+            variant="ghost",
+            color_scheme="gray",
+            custom_attrs={"aria-label": "Cambiar entre modo claro y oscuro"},
+        ),
         rx.spacer(),
         align="center",
         width="100%",
@@ -37,17 +35,12 @@ def _item(href: str, label: str, icon: str) -> rx.Component:
     active = rx.State.router.page.path == href
     return rx.link(
         rx.hstack(
-            rx.icon(icon, size=18),
-            rx.text(label, size="3", weight="medium"),
-            color=rx.cond(active, styles.accent_text_color, styles.text_color),
-            background_color=rx.cond(active, styles.accent_bg_color, "transparent"),
-            style={
-                "_hover": {
-                    "background_color": rx.cond(
-                        active, styles.accent_bg_color, styles.gray_bg_color
-                    ),
-                },
-            },
+            rx.icon(icon, size=16),
+            rx.text(label, size="2"),
+            color=rx.cond(active, rx.color("gray", 12), styles.text_color),
+            font_weight=rx.cond(active, "500", "400"),
+            background_color=rx.cond(active, rx.color("gray", 4, True), "transparent"),
+            style={"_hover": {"background_color": rx.color("gray", 3, True)}},
             align="center",
             border_radius=styles.border_radius,
             width="100%",
@@ -57,6 +50,7 @@ def _item(href: str, label: str, icon: str) -> rx.Component:
         underline="none",
         href=href,
         width="100%",
+        custom_attrs={"aria-current": rx.cond(active, "page", "false")},
     )
 
 
@@ -65,7 +59,7 @@ def sidebar() -> rx.Component:
         rx.vstack(
             _header(),
             rx.vstack(
-                *[_item(href, label, icon) for href, label, icon in _ITEMS],
+                *[_item(href, label, icon) for href, label, icon in NAV_ITEMS],
                 spacing="1",
                 width="100%",
             ),

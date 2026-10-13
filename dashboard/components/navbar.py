@@ -1,4 +1,4 @@
-"""Mobile-only top header with logo, page title and color-mode toggle."""
+"""Mobile-only top header with the wordmark and color-mode toggle."""
 
 import reflex as rx
 
@@ -8,14 +8,13 @@ from .. import styles
 def navbar() -> rx.Component:
     return rx.el.nav(
         rx.hstack(
-            rx.hstack(
-                rx.icon("wallet", size=20, color=rx.color("teal", 9)),
-                rx.heading("Mi Presupuesto", size="3", weight="bold"),
-                align="center",
-                spacing="2",
-            ),
+            rx.heading("Mi presupuesto", size="3", weight="medium", letter_spacing="-0.01em"),
             rx.spacer(),
-            rx.color_mode.button(style={"opacity": "0.8", "scale": "0.95"}),
+            rx.color_mode.button(
+                variant="ghost",
+                color_scheme="gray",
+                custom_attrs={"aria-label": "Cambiar entre modo claro y oscuro"},
+            ),
             align="center",
             width="100%",
             padding_y="0.75em",

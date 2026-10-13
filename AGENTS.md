@@ -20,6 +20,8 @@ Personal budget/expense management app built with **Reflex** (Python full-stack 
   `dashboard/database/operations.py` creates `db_manager` at import time and opens the database lazily on
   first use (`data/expenses.db`, relative to the cwd, for the default SQLite URL): tests must
   `monkeypatch.chdir(tmp_path)` before touching it.
+- To look at the UI, use `scripts/ui_preview.sh` (it seeds an invented database with
+  `scripts/seed_demo_data.py`); never screenshot or open the app running on the real database.
 - A script that must run against real data prints aggregates only (counts, percentages, timings),
   never concept text, amounts or dates of individual rows.
 - `.env` may hold credentials and settings overrides: never read, print or commit it. Validate the compose
@@ -37,6 +39,7 @@ make docker-up    # build and start the full stack (app + Ollama + PostgreSQL)
 make docker-down  # stop the stack
 
 uv run pytest tests/ -q          # unit tests (synthetic data only)
+scripts/ui_preview.sh /tmp/shots # screenshots (desktop/mobile, light/dark) of a throwaway copy with synthetic demo data
 uv add 'package<=X.Y.Z'          # add a dependency, pinned with an upper bound (see below)
 ```
 

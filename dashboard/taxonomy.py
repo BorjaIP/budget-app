@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 OTHERS = "Otros"
 OTHERS_SUB = "General"
 FALLBACK = (OTHERS, OTHERS_SUB)
+NO_SUBCATEGORY = "Sin subcategoría"  # option shown in pickers; stored as no subcategory
 MAX_NAME_LENGTH = 40
 MAX_DESCRIPTION_LENGTH = 200
 

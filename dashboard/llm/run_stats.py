@@ -37,7 +37,7 @@ class RunStats:
         return self.confidence_sum / self.confidence_count if self.confidence_count else None
 
     def record(
-        self, category: str, subcategory: str, elapsed_ms: float, confidence: float | None = None
+        self, category: str, subcategory: str | None, elapsed_ms: float, confidence: float | None = None
     ) -> None:
         self.total += 1
         if confidence is not None:

@@ -29,7 +29,15 @@ def section(title: str, description: str, control: rx.Component) -> rx.Component
 @template(route="/settings", title="Ajustes")
 def settings() -> rx.Component:
     return rx.vstack(
-        page_header("Ajustes", "Apariencia de la aplicación."),
+        page_header("Ajustes", "Categorías y apariencia de la aplicación."),
+        section(
+            "Categorías",
+            "Crea, renombra o borra categorías y subcategorías. Son las que usa el modelo local para categorizar.",
+            rx.link(
+                rx.button("Gestionar categorías", variant="soft", color_scheme="gray", size="2"),
+                href="/categories",
+            ),
+        ),
         section(
             "Color principal",
             "Acento de botones y elementos activos. El gris mantiene la interfaz neutra.",

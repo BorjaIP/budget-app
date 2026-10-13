@@ -10,7 +10,7 @@ from ..components.empty_state import empty_state
 from ..components.notice import error_notice
 from ..components.page_header import page_header
 from ..database.operations import db_manager
-from ..llm.llm_call import CATEGORY_TAXONOMY
+from ..taxonomy import category_names
 from ..periods import resolve_period
 from ..recurring import RecurringRow, find_recurring
 from ..templates import template
@@ -45,7 +45,7 @@ class BudgetState(rx.State):
             }
             self.recurring = find_recurring(db_manager.get_all_expenses())
             self.recurring_total_fmt = _money(sum(r.amount for r in self.recurring))
-            self.rows = build_rows(list(CATEGORY_TAXONOMY), db_manager.get_budgets(), spending)
+            self.rows = build_rows(category_names(db_manager.taxonomy.load()), db_manager.get_budgets(), spending)
         except Exception:
             logger.exception("Could not load the budgets")
             self.load_error = True

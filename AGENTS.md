@@ -60,7 +60,8 @@ The Reflex app is configured in `rxconfig.py` with `app_name="dashboard"`. Entry
 - **Config** (`config.py`): `Settings` (pydantic-settings) reads environment variables and `.env`: `DATABASE_URL` (default `sqlite:///data/expenses.db`; PostgreSQL in Docker), `OLLAMA_BASE_URL`, `LOG_LEVEL`, `uploaded_files_dir`.
 - **Database** (`database/`): `DatabaseManager` in `operations.py` wraps SQLModel and creates its engine lazily from `settings.database_url`. `models.py` defines the `Expense` table. Schema changes on existing SQLite databases go through the additive guarded migration in `DatabaseManager._migrate_schema` (SQLite only; there is no Alembic).
 - **File processing** (`utils/`): `FileReader` parses uploaded `.xls`/`.xlsx` bank exports with Pandas (`xlrd` for `.xls`, `openpyxl` for `.xlsx`). `FileProcessor` handles the upload-to-database pipeline with deduplication.
-- **LLM** (`llm/`): `llm_call.py` calls Ollama (default model `qwen2.5:3b-instruct`) at `settings.ollama_base_url` (env `OLLAMA_BASE_URL`, default `http://localhost:11434`). The prompt (`prompt.py`) asks for `[Category][Subcategory]`; few-shot examples come from rows the user tagged by hand (`category_source = "manual"`), falling back to static examples. `CATEGORY_TAXONOMY` is reviewed by the owner: **never change its categories or subcategories**.
+- **LLM** (`llm/`): `llm_call.py` calls Ollama (default model `qwen2.5:3b-instruct`) at `settings.ollama_base_url` (env `OLLAMA_BASE_URL`, default `http://localhost:11434`) in two constrained steps: first the category among the names in the user's taxonomy, then the subcategory of that category (or none). Answers are restricted with Ollama structured outputs, so they are always valid. Prompts live in `prompt.py`; nothing in code names a category.
+- **Taxonomy** (`taxonomy.py`, `database/taxonomy_repository.py`, `taxonomy_state.py`, page `/categories`): the categories and subcategories are user data (tables `category`, `subcategory`, each with an optional description that is sent to the model). `DEFAULT_TAXONOMY` is the owner's original list: it seeds a new database and is what "Restaurar originales" brings back; the owner reviewed it, so do not edit it casually. An expense has a category and an optional subcategory; without a valid subcategory it stays in its category, without a valid category it is Otros / General (reserved: it cannot be renamed or deleted). Renaming follows through expenses, merchant labels and budgets; deleting a category sends its expenses to Otros / General. Never hard-code category names in logic or UI: read them from the repository (`db_manager.taxonomy.load()`) or `TaxonomyState`.
 - **UI components** (`components/`), **templates** (`templates/template.py`), **styles** (`styles.py`, Radix UI theme).
 
 ### Categorization pipeline
@@ -73,9 +74,11 @@ page; blocking database calls run in threads). Each movement goes through, cheap
    with `DatabaseManager.learn_from_correction`, which also applies it to the merchant's non-manual rows.
 2. **Similarity** (`llm/retrieval.py`, character 3-gram TF-IDF cosine): a labeled movement at least 0.85 similar,
    with no close rival of another category, is reused with `category_source="similar"`.
-3. **Model with retrieved examples**: the 8 most similar labeled merchants go in the prompt (plus the generic
-   examples while there are fewer than 20 labels), temperature 0. The answer stores `category_confidence` (joint
-   probability of the two bracketed tags, from Ollama `logprobs`).
+3. **Model, two constrained steps** (`llm/llm_call.py`): the 8 most similar labeled merchants go in the prompt (plus
+   the generic examples while there are fewer than 20 labels), temperature 0. With more than 30 categories
+   `llm/shortlist.py` offers only the plausible ones (those of similar labels, the most used, unused ones whose
+   name or description matches) so the result does not degrade as the taxonomy grows. The answer stores
+   `category_confidence` (product of both steps' probabilities, from Ollama `logprobs`).
 
 Rows without category, or from the model below `LLM_CONFIDENCE_THRESHOLD` (default 0.6, not calibrated), are the
 "Por revisar" queue. When a run ends, a global dialog (`components/categorization_results.py`) summarizes it and

@@ -1,91 +1,111 @@
-from dashboard.llm.llm_call import build_few_shot_examples, parse_category_response
-from dashboard.llm.prompt import STATIC_EXAMPLES
+import asyncio
+import json
+import math
+
+from dashboard.llm import llm_call
+from dashboard.llm.llm_call import categorize_with_confidence, value_confidence
+from dashboard.llm.prompt import NONE_OPTION, category_prompt, subcategory_prompt
+from dashboard.taxonomy import CategoryEntry, SubEntry, default_taxonomy
 
 
-class TestParseCategoryResponse:
-    def test_two_brackets_happy_path(self):
-        assert parse_category_response("[Gastos diarios][Restaurantes]") == (
-            "Gastos diarios",
-            "Restaurantes",
-        )
-
-    def test_two_brackets_with_surrounding_text(self):
-        raw = "Sure, here is the category: [Transporte][Taxi/Uber] done."
-        assert parse_category_response(raw) == ("Transporte", "Taxi/Uber")
-
-    def test_single_bracket_subcategory_maps_to_parent(self):
-        assert parse_category_response("[Restaurantes]") == (
-            "Gastos diarios",
-            "Restaurantes",
-        )
-
-    def test_single_bracket_category_maps_to_first_subcategory(self):
-        assert parse_category_response("[Transporte]") == ("Transporte", "Combustible")
-
-    def test_empty_input_falls_back(self):
-        assert parse_category_response("") == ("Otros", "General")
-
-    def test_garbage_input_falls_back(self):
-        assert parse_category_response("no brackets here") == ("Otros", "General")
-
-    def test_invalid_two_bracket_pair_falls_back(self):
-        assert parse_category_response("[NotACategory][NotASubcategory]") == (
-            "Otros",
-            "General",
-        )
-
-    def test_valid_category_invalid_subcategory_falls_back(self):
-        assert parse_category_response("[Transporte][Bicicleta]") == (
-            "Otros",
-            "General",
-        )
+def _answer(key: str, value: str, probability: float = 0.9) -> dict:
+    """What Ollama returns for a constrained answer, with the value as one token."""
+    tokens = [
+        {"token": '{ "', "logprob": -9.0},
+        {"token": key, "logprob": -0.1},
+        {"token": '": "', "logprob": 0.0},
+        {"token": value, "logprob": math.log(probability)},
+        {"token": '" }', "logprob": -0.5},
+    ]
+    return {"response": f'{{ "{key}": "{value}" }}', "logprobs": tokens}
 
 
-class TestBuildFewShotExamples:
-    def test_falls_back_to_static_when_no_rows(self):
-        assert build_few_shot_examples([]) == STATIC_EXAMPLES
+def _fake_model(monkeypatch, answers: list[dict]) -> list[dict]:
+    calls: list[dict] = []
 
-    def test_falls_back_to_static_when_fewer_than_three_valid_rows(self):
-        rows = [
-            {"concept": "Bizum a Marta", "category": "Gastos diarios", "subcategory": "Comida"},
-            {"concept": "Netflix", "category": "Gastos diarios", "subcategory": "Suscripciones"},
-        ]
-        assert build_few_shot_examples(rows) == STATIC_EXAMPLES
+    async def fake(prompt, model=llm_call.DEFAULT_MODEL, schema=None, timeout=0):
+        calls.append({"prompt": prompt, "schema": schema})
+        return answers[len(calls) - 1]
 
-    def test_ignores_rows_with_invalid_taxonomy(self):
-        rows = [
-            {"concept": "Bizum a Marta", "category": "Gastos diarios", "subcategory": "Comida"},
-            {"concept": "Netflix", "category": "Gastos diarios", "subcategory": "Suscripciones"},
-            {"concept": "Bad row", "category": "NotReal", "subcategory": "NotReal"},
-            {"concept": "Uber", "category": "Transporte", "subcategory": "Taxi/Uber"},
-        ]
-        # Only 3 valid rows -> below the 3-row threshold is false (3 is enough)
-        result = build_few_shot_examples(rows)
-        assert result != STATIC_EXAMPLES
-        assert "Bad row" not in result
+    monkeypatch.setattr(llm_call, "query_llm_detailed", fake)
+    return calls
 
-    def test_formats_valid_examples_correctly(self):
-        rows = [
-            {"concept": "Bizum a Marta", "category": "Gastos diarios", "subcategory": "Comida"},
-            {"concept": "Netflix", "category": "Gastos diarios", "subcategory": "Suscripciones"},
-            {"concept": "Uber", "category": "Transporte", "subcategory": "Taxi/Uber"},
-        ]
-        result = build_few_shot_examples(rows)
-        assert result.startswith("Examples:")
-        assert "operation: Bizum a Marta" in result
-        assert "→ [Gastos diarios][Comida]" in result
-        assert "operation: Uber" in result
-        assert "→ [Transporte][Taxi/Uber]" in result
 
-    def test_prefers_one_example_per_distinct_category_up_to_limit(self):
-        rows = [
-            {"concept": f"Concept {i}", "category": "Gastos diarios", "subcategory": "Comida"}
-            for i in range(5)
-        ] + [
-            {"concept": "Uber", "category": "Transporte", "subcategory": "Taxi/Uber"},
-            {"concept": "Netflix", "category": "Ocio", "subcategory": "Otros"},
-        ]
-        result = build_few_shot_examples(rows, limit=2)
-        # Should prefer distinct categories first: Gastos diarios + Transporte
-        assert "Uber" in result
-        assert "Concept 0" in result
+def test_value_confidence_counts_only_the_tokens_of_the_answered_value():
+    answer = _answer("category", "Ocio", 0.8)
+
+    assert math.isclose(value_confidence(answer["response"], answer["logprobs"], "category"), 0.8, rel_tol=1e-9)
+
+
+def test_value_confidence_is_none_when_tokens_do_not_rebuild_the_response():
+    answer = _answer("category", "Ocio")
+
+    assert value_confidence(answer["response"] + "x", answer["logprobs"], "category") is None
+    assert value_confidence("not json", [{"token": "not json", "logprob": -1.0}], "category") is None
+    assert value_confidence(answer["response"], None, "category") is None
+
+
+def test_two_steps_give_category_subcategory_and_the_product_of_their_probabilities(monkeypatch):
+    calls = _fake_model(monkeypatch, [_answer("category", "Ocio", 0.9), _answer("subcategory", "Libros", 0.5)])
+
+    result = asyncio.run(categorize_with_confidence("Libreria Central", default_taxonomy()))
+
+    assert result[:2] == ("Ocio", "Libros")
+    assert math.isclose(result[2], 0.45, rel_tol=1e-9)
+    assert calls[0]["schema"]["properties"]["category"]["enum"][0] == "Deuda"
+    assert "Libros" in calls[1]["schema"]["properties"]["subcategory"]["enum"]
+    assert NONE_OPTION in calls[1]["schema"]["properties"]["subcategory"]["enum"]
+
+
+def test_answering_none_keeps_only_the_parent_category(monkeypatch):
+    _fake_model(monkeypatch, [_answer("category", "Ocio"), _answer("subcategory", NONE_OPTION)])
+
+    category, subcategory, _ = asyncio.run(categorize_with_confidence("Algo raro", default_taxonomy()))
+
+    assert (category, subcategory) == ("Ocio", None)
+
+
+def test_a_category_without_subcategories_needs_a_single_call(monkeypatch):
+    taxonomy = [CategoryEntry("Mascotas"), CategoryEntry("Ocio", subcategories=[SubEntry("Libros"), SubEntry("Cine")])]
+    calls = _fake_model(monkeypatch, [_answer("category", "Mascotas", 0.7)])
+
+    category, subcategory, confidence = asyncio.run(categorize_with_confidence("Veterinario", taxonomy))
+
+    assert (category, subcategory) == ("Mascotas", None)
+    assert len(calls) == 1 and math.isclose(confidence, 0.7, rel_tol=1e-9)
+
+
+def test_a_taxonomy_with_one_category_never_asks_for_it(monkeypatch):
+    taxonomy = [CategoryEntry("Todo", subcategories=[SubEntry("A"), SubEntry("B")])]
+    calls = _fake_model(monkeypatch, [_answer("subcategory", "B", 0.6)])
+
+    category, subcategory, _ = asyncio.run(categorize_with_confidence("x", taxonomy))
+
+    assert (category, subcategory) == ("Todo", "B") and len(calls) == 1
+
+
+def test_an_unreadable_answer_falls_back_to_otros_general_with_zero_confidence(monkeypatch):
+    _fake_model(monkeypatch, [{"response": "I think it is leisure", "logprobs": []}])
+
+    assert asyncio.run(categorize_with_confidence("x", default_taxonomy())) == ("Otros", "General", 0.0)
+
+
+def test_prompts_list_names_descriptions_and_examples_from_the_taxonomy():
+    taxonomy = [CategoryEntry("Mascotas", "veterinario y comida de animales"), CategoryEntry("Ocio")]
+    ocio = CategoryEntry("Ocio", subcategories=[SubEntry("Libros", "novelas y ensayo"), SubEntry("Cine")])
+
+    first = category_prompt(taxonomy, [("Clinica Vet Sol", "Mascotas")], "Pienso Perros SL")
+    second = subcategory_prompt(ocio, [("Libreria Central", "Libros")], "Casa del Libro")
+
+    assert "- Mascotas: veterinario y comida de animales" in first and "- Ocio\n" in first
+    assert "operation: Clinica Vet Sol\ncategory: Mascotas" in first and first.endswith("operation: Pienso Perros SL\ncategory:")
+    assert '- Libros: novelas y ensayo' in second and "(ninguna)" in second
+    assert "operation: Libreria Central\nsubcategory: Libros" in second
+
+
+def test_the_prompt_size_grows_with_names_not_with_every_subcategory():
+    many = [CategoryEntry(f"Categoria {i}", subcategories=[SubEntry(f"Sub {i}-{j}") for j in range(30)]) for i in range(100)]
+
+    prompt = category_prompt(many, [], "x")
+
+    assert "Sub 3-4" not in prompt and len(prompt) < 4000

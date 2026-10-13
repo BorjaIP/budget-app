@@ -183,6 +183,13 @@ class DatabaseManager:
         with self.get_session() as session:
             return list(session.exec(select(Expense).where(Expense.id.in_(ids))).all())  # type: ignore[attr-defined]
 
+    def count_expenses_in(self, category: str, subcategory: str | None = None) -> int:
+        with self.get_session() as session:
+            statement = select(func.count()).select_from(Expense).where(Expense.category == category)
+            if subcategory is not None:
+                statement = statement.where(Expense.subcategory == subcategory)
+            return int(session.exec(statement).one())
+
     def count_to_review(self) -> int:
         with self.get_session() as session:
             statement = select(func.count()).select_from(Expense).where(self._needs_review_clause())

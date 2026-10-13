@@ -1,290 +1,181 @@
+"""Local model access and the two-step categorization (category, then subcategory).
+
+Both steps use Ollama structured outputs: the answer is constrained to the names that exist in the user's
+taxonomy, so it is always valid and the prompt only lists names (step 1) or one category's subcategories (step 2).
+That keeps the cost flat whether the user has 10 categories or 100.
+"""
+
+import json
 import logging
 import math
-import re
 import time
 from typing import Any
 
 import httpx
 
 from dashboard.config import settings
+from dashboard.taxonomy import FALLBACK, CategoryEntry, Taxonomy, find_category
 
-from .prompt import PROMPT, STATIC_EXAMPLES
-from .retrieval import SimilarityIndex, select_similar
+from .prompt import NONE_OPTION, STATIC_EXAMPLES, category_prompt, subcategory_prompt
+from .retrieval import SimilarityIndex
+from .shortlist import shortlist
 
 logger = logging.getLogger(__name__)
 
-# With at least this many labeled merchants the retrieved examples are enough on their own.
-RICH_CORPUS = 20
 DEFAULT_MODEL = "qwen2.5:3b-instruct"
+EXAMPLES_PER_STEP = 8
+MAX_CONCEPT_LENGTH = 200
+CONTEXT_TOKENS = 8192  # enough for a prompt that lists a hundred categories
 
-
-CATEGORY_TAXONOMY: dict[str, list[str]] = {
-    "Deuda": ["Tarjetas de crédito", "Préstamo caldera", "Otros préstamos", "Otros"],
-    "Educación": ["Cursos", "Clases de música", "Otros"],
-    "Ocio": [
-        "Libros",
-        "Conciertos o espectáculos",
-        "Actividades al aire libre",
-        "Fotografía",
-        "Deporte",
-        "Cine o teatro",
-        "Otros",
-    ],
-    "Gastos diarios": [
-        "Comida",
-        "Restaurantes",
-        "Comida domicilio",
-        "Higiene personal",
-        "Ropa",
-        "Lavandería o tintorería",
-        "Peluquería o belleza",
-        "Suscripciones",
-        "Otros",
-    ],
-    "Regalos": ["Regalos", "Donativos (ONG)", "Otros"],
-    "Salud/médicos": [
-        "Médicos (dentista/oculista)",
-        "Especialistas",
-        "Farmacia",
-        "Urgencias",
-        "Otros",
-    ],
-    "Vivienda": [
-        "Alquiler o hipoteca",
-        "Impuestos a la propiedad",
-        "Muebles",
-        "Artículos para el hogar",
-        "Mantenimiento",
-        "Mejoras",
-        "Mudanza",
-        "Otros",
-    ],
-    "Tecnología": [
-        "Dominios y alojamiento",
-        "Servicios online",
-        "Hardware",
-        "Software",
-        "Otros",
-    ],
-    "Transporte": ["Combustible", "Transporte público", "Taxi/Uber", "Otros"],
-    "Viajes": ["Billetes de avión", "Hoteles", "Comida", "Transporte", "Ocio", "Otros"],
-    "Servicios básicos": ["Internet", "Electricidad", "Calefacción o gas", "Otros"],
-    "Otros": ["General"],
-}
-
-
-_SUBCATEGORY_TO_CATEGORY: dict[str, str] = {}
-for _cat, _subs in CATEGORY_TAXONOMY.items():
-    for _sub in _subs:
-        _SUBCATEGORY_TO_CATEGORY.setdefault(_sub, _cat)
-
-
-_BRACKET_RE = re.compile(r"\[([^\[\]]+)\]")
-
-_FALLBACK = ("Otros", "General")
 
 def _ollama_base_url() -> str:
     return settings.ollama_base_url
 
 
-def _is_valid_category(category: str, subcategory: str) -> bool:
-    subs = CATEGORY_TAXONOMY.get(category)
-    return subs is not None and subcategory in subs
+def _schema(key: str, options: list[str]) -> dict:
+    return {"type": "object", "properties": {key: {"type": "string", "enum": options}}, "required": [key]}
 
 
-def parse_category_response(raw: str) -> tuple[str, str]:
-    """Extract (category, subcategory) from an LLM response.
+def value_confidence(response: str, tokens: list[dict] | None, key: str) -> float | None:
+    """Probability the model gave to the string it answered under `key` in a JSON response.
 
-    The model is expected to return two bracketed tags in order, e.g.
-    '[Comida][Restaurantes]' (category, subcategory). Defensively also
-    handles a single bracket (treated as a subcategory, mapped to its parent
-    category) or garbage output. Returns ('Otros', 'General') whenever the
-    parsed pair does not validate against CATEGORY_TAXONOMY.
+    `tokens` is Ollama's `logprobs` list. Only tokens inside the value count; the forced JSON syntax is ignored.
+    None when the tokens do not rebuild the response.
     """
-    if not raw:
-        return _FALLBACK
-
-    matches = [m.strip() for m in _BRACKET_RE.findall(raw) if m.strip()]
-    if not matches:
-        return _FALLBACK
-
-    if len(matches) == 1:
-        tag = matches[0]
-        if tag in CATEGORY_TAXONOMY:
-            # Tag matches a top-level category name: use its first subcategory.
-            return (tag, CATEGORY_TAXONOMY[tag][0])
-        cat = _SUBCATEGORY_TO_CATEGORY.get(tag)
-        if cat is None:
-            return _FALLBACK
-        return (cat, tag) if _is_valid_category(cat, tag) else _FALLBACK
-
-    cat, sub = matches[0], matches[1]
-    if not _is_valid_category(cat, sub):
-        return _FALLBACK
-    return (cat, sub)
-
-
-def build_few_shot_examples(rows: list[dict[str, Any]], limit: int = 8, diverse: bool = True) -> str:
-    """Build the '{examples}' prompt block from manually-tagged expense rows.
-
-    Each row must provide 'concept', 'category', 'subcategory' keys. Only
-    rows whose category/subcategory validate against CATEGORY_TAXONOMY are
-    used, up to `limit`, preferring one per distinct category. Falls back to
-    the static hardcoded examples when fewer than 3 valid rows are available.
-    """
-    valid_rows = [
-        row
-        for row in rows
-        if row.get("concept")
-        and _is_valid_category(row.get("category", ""), row.get("subcategory", ""))
-    ]
-
-    if len(valid_rows) < 3:
-        return STATIC_EXAMPLES
-
-    if not diverse:  # rows are already ranked by similarity: keep their order
-        selected = valid_rows[-limit:]
-        lines = ["Examples:"]
-        for row in selected:
-            lines.append(f"operation: {row['concept']}")
-            lines.append(f"→ [{row['category']}][{row['subcategory']}]")
-            lines.append("")
-        return "\n".join(lines).rstrip()
-
-    seen_categories: set[str] = set()
-    selected: list[dict[str, Any]] = []
-    for row in valid_rows:
-        if row["category"] in seen_categories:
-            continue
-        seen_categories.add(row["category"])
-        selected.append(row)
-        if len(selected) >= limit:
-            break
-
-    if len(selected) < limit:
-        for row in valid_rows:
-            if row in selected:
-                continue
-            selected.append(row)
-            if len(selected) >= limit:
-                break
-
-    lines = ["Examples:"]
-    for row in selected:
-        lines.append(f"operation: {row['concept']}")
-        lines.append(f"→ [{row['category']}][{row['subcategory']}]")
-        lines.append("")
-    return "\n".join(lines).rstrip()
-
-
-def _get_dynamic_examples(
-    concept: str = "",
-    limit: int = 8,
-    labels: list[dict[str, Any]] | None = None,
-    index: SimilarityIndex | None = None,
-) -> str:
-    """Examples from what the user taught the app: the labels most similar to `concept`.
-
-    Callers categorizing many rows pass `labels` and a prebuilt `index` to avoid rebuilding them.
-    """
-    try:
-        from dashboard.database.operations import db_manager
-
-        if labels is None:
-            labels = db_manager.get_merchant_labels()
-        if len(labels) >= 3:
-            retrieved = build_few_shot_examples(select_similar(concept, labels, limit, index), limit, diverse=False)
-            if len(labels) >= RICH_CORPUS or retrieved == STATIC_EXAMPLES:
-                return retrieved
-            # Few labels: keep the generic examples too, with the retrieved ones closest to the question.
-            return STATIC_EXAMPLES + "\n\n" + retrieved.removeprefix("Examples:").lstrip()
-        rows = db_manager.get_manually_tagged_examples(limit=limit)
-    except Exception:
-        return STATIC_EXAMPLES
-    return build_few_shot_examples(rows, limit=limit)
-
-
-def bracket_confidence(tokens: list[dict] | None) -> float | None:
-    """Joint probability the model gave to the two `[Category][Subcategory]` tags it answered.
-
-    `tokens` is Ollama's `logprobs` list ({"token", "logprob"}); only tokens that open or sit
-    inside the first two bracket pairs count. None when the answer has no brackets.
-    """
-    if not tokens:
+    if not tokens or "".join(t["token"] for t in tokens) != response:
         return None
-    depth, closed, total, seen = 0, 0, 0.0, False
+    try:
+        value = json.loads(response)[key]
+    except (ValueError, KeyError, TypeError):
+        return None
+    marker = response.find(f'"{key}"')
+    start = response.find(f'"{value}"', marker if marker >= 0 else 0)
+    if start < 0:
+        return None
+    start, end = start + 1, start + 1 + len(value)
+    total, position, seen = 0.0, 0, False
     for entry in tokens:
-        text, logprob = entry["token"], entry["logprob"]
-        if depth > 0 or "[" in text:
-            total += logprob
+        token_end = position + len(entry["token"])
+        if position < end and token_end > start:
+            total += entry["logprob"]
             seen = True
-        for ch in text:
-            if ch == "[":
-                depth += 1
-            elif ch == "]" and depth > 0:
-                depth -= 1
-                closed += 1
-        if closed >= 2:
-            break
+        position = token_end
     return math.exp(total) if seen else None
 
 
 async def query_llm_detailed(
     prompt: str,
     model: str = DEFAULT_MODEL,
+    schema: dict | None = None,
     timeout: float = 180.0,
 ) -> dict:
     """Answer plus token log-probabilities. Temperature 0 so the same input gives the same answer."""
+    body: dict[str, Any] = {
+        "model": model,
+        "prompt": prompt,
+        "stream": False,
+        "logprobs": True,
+        "options": {"temperature": 0.0, "seed": 42, "num_predict": 60, "num_ctx": CONTEXT_TOKENS},
+    }
+    if schema is not None:
+        body["format"] = schema
     async with httpx.AsyncClient(timeout=timeout) as client:
-        response = await client.post(
-            f"{_ollama_base_url()}/api/generate",
-            json={
-                "model": model,
-                "prompt": prompt,
-                "stream": False,
-                "logprobs": True,
-                "options": {"temperature": 0.0, "seed": 42, "num_predict": 48},
-            },
-        )
+        response = await client.post(f"{_ollama_base_url()}/api/generate", json=body)
         response.raise_for_status()
         return response.json()
 
 
-async def query_llm(
-    prompt: str,
-    model: str = DEFAULT_MODEL,
-    timeout: float = 180.0,
-) -> str:
-    return (await query_llm_detailed(prompt, model=model, timeout=timeout)).get("response", "")
+async def _choose(prompt: str, key: str, options: list[str], model: str) -> tuple[str | None, float | None]:
+    """One constrained answer: (the option, its probability). (None, None) when it cannot be read."""
+    answer = await query_llm_detailed(prompt, model=model, schema=_schema(key, options))
+    raw = answer.get("response", "")
+    try:
+        chosen = json.loads(raw)[key]
+    except (ValueError, KeyError, TypeError):
+        return None, None
+    if chosen not in options:
+        return None, None
+    return chosen, value_confidence(raw, answer.get("logprobs"), key)
+
+
+def _valid_labels(labels: list[dict[str, Any]], taxonomy: Taxonomy) -> list[dict[str, Any]]:
+    """Labels whose category still exists (their subcategory is checked per step)."""
+    return [label for label in labels if find_category(taxonomy, label["category"]) is not None]
+
+
+def _category_examples(
+    concept: str, labels: list[dict[str, Any]], index: SimilarityIndex | None, taxonomy: Taxonomy
+) -> list[tuple[str, str]]:
+    """Most similar labeled movements as (concept, category), the closest last. Generic ones fill a small corpus."""
+    usable = _valid_labels(labels, taxonomy)
+    ranked = [label for _, label in (index or SimilarityIndex(labels)).search(concept, EXAMPLES_PER_STEP * 3)]
+    ranked = [label for label in ranked if label in usable][:EXAMPLES_PER_STEP]
+    examples = [(label["concept"], label["category"]) for label in reversed(ranked)]
+    if len(usable) < 20:
+        generic = [(text, cat) for text, cat, _ in STATIC_EXAMPLES if find_category(taxonomy, cat) is not None]
+        examples = generic + examples
+    return examples
+
+
+def _subcategory_examples(
+    concept: str, category: CategoryEntry, labels: list[dict[str, Any]], index: SimilarityIndex | None
+) -> list[tuple[str, str]]:
+    names = {s.name for s in category.subcategories}
+    pool = (index or SimilarityIndex(labels)).search(concept, 60)
+    chosen = [
+        label
+        for _, label in pool
+        if label["category"] == category.name and label.get("subcategory") in names
+    ][:EXAMPLES_PER_STEP]
+    return [(label["concept"], label["subcategory"]) for label in reversed(chosen)]
 
 
 async def categorize_with_confidence(
     concept: str,
+    taxonomy: Taxonomy,
     model: str = DEFAULT_MODEL,
     labels: list[dict[str, Any]] | None = None,
     index: SimilarityIndex | None = None,
-) -> tuple[str, str, float | None]:
-    """(category, subcategory, confidence). Confidence is 0 when the answer fell back to Otros/General."""
-    examples = _get_dynamic_examples(concept, labels=labels, index=index)
-    formatted_prompt = PROMPT.format(examples=examples, variable=concept)
+) -> tuple[str, str | None, float | None]:
+    """(category, subcategory or None, confidence) for a bank concept.
+
+    Confidence is the product of the probability of each step. It is 0 when the model's answer could not be read
+    and the result is the fallback (Otros / General).
+    """
+    labels = labels or []
+    concept = concept[:MAX_CONCEPT_LENGTH]
     started = time.perf_counter()
-    answer = await query_llm_detailed(formatted_prompt, model=model)
-    raw = answer.get("response", "")
-    result = parse_category_response(raw)
-    confidence = bracket_confidence(answer.get("logprobs"))
+    if not taxonomy:
+        return FALLBACK[0], FALLBACK[1], 0.0
+    full_taxonomy = taxonomy
+    taxonomy = shortlist(full_taxonomy, concept, labels, index)  # a long taxonomy is cut to what can fit
+    names = [c.name for c in taxonomy]
+
+    confidence: float | None = 1.0
+    if len(names) == 1:
+        category_name = names[0]
+    else:
+        prompt = category_prompt(taxonomy, _category_examples(concept, labels, index, taxonomy), concept)
+        category_name, step = await _choose(prompt, "category", names, model)
+        if category_name is None:
+            logger.warning("The model answer could not be read; used Otros / General")
+            return FALLBACK[0], FALLBACK[1], 0.0
+        confidence = step
+
+    category = find_category(full_taxonomy, category_name)
+    subcategory: str | None = None
+    if category and category.subcategories:
+        options = [s.name for s in category.subcategories]
+        if len(options) == 1:
+            subcategory = options[0]
+        else:
+            prompt = subcategory_prompt(category, _subcategory_examples(concept, category, labels, index), concept)
+            chosen, step = await _choose(prompt, "subcategory", [*options, NONE_OPTION], model)
+            subcategory = None if chosen in (None, NONE_OPTION) else chosen
+            if confidence is not None:
+                confidence = None if step is None else confidence * step
+
     elapsed_ms = (time.perf_counter() - started) * 1000
-    # Concepts and model answers come from bank data: only logged at DEBUG.
-    logger.debug(
-        "categorized %r -> %s (raw %r, confidence %s, %.0f ms)", concept, result, raw[:120], confidence, elapsed_ms
-    )
-    if result == _FALLBACK:
-        logger.warning(
-            "Result is Otros/General: the answer did not match the taxonomy or the model chose it (%.0f ms)",
-            elapsed_ms,
-        )
-    return result[0], result[1], confidence
-
-
-async def categorize_expense(concept: str, model: str = DEFAULT_MODEL) -> tuple[str, str]:
-    category, subcategory, _ = await categorize_with_confidence(concept, model=model)
-    return category, subcategory
+    # Concepts come from bank data: only logged at DEBUG.
+    logger.debug("categorized %r -> %s / %s (confidence %s, %.0f ms)", concept, category_name, subcategory, confidence, elapsed_ms)
+    return category_name, subcategory, confidence

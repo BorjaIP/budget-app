@@ -5,24 +5,24 @@ import logging
 import reflex as rx
 
 from dashboard.database.operations import db_manager
-from dashboard.llm.llm_call import CATEGORY_TAXONOMY
+from dashboard.taxonomy import category_names
 from dashboard.trends import ALL, UNCATEGORIZED, monthly_category_totals
 from dashboard.views.charts import _CHART_HEIGHT, _Y_TICK_FORMATTER, _custom_tooltip, _x_axis
 
 logger = logging.getLogger(__name__)
-
-CATEGORY_OPTIONS = [ALL, *CATEGORY_TAXONOMY, UNCATEGORIZED]
-
 
 class CategoryTrendState(rx.State):
     category: str = ALL
     data: list[dict] = []
     load_error: bool = False
 
+    options: list[str] = [ALL, UNCATEGORIZED]
+
     @rx.event
     def load_trend(self):
         self.load_error = False
         try:
+            self.options = [ALL, *category_names(db_manager.taxonomy.load()), UNCATEGORIZED]
             _, latest = db_manager.get_date_bounds()
             self.data = monthly_category_totals(db_manager.get_all_expenses(), self.category, latest)
         except Exception:
@@ -39,7 +39,7 @@ class CategoryTrendState(rx.State):
 def category_trend() -> rx.Component:
     return rx.vstack(
         rx.select(
-            CATEGORY_OPTIONS,
+            CategoryTrendState.options,
             value=CategoryTrendState.category,
             on_change=CategoryTrendState.set_category,
             size="2",

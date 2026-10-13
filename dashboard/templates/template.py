@@ -11,6 +11,7 @@ from ..components.bottom_nav import bottom_nav
 from ..components.categorization_results import categorization_banner, results_dialog
 from ..components.navbar import navbar
 from ..components.sidebar import sidebar
+from ..taxonomy_state import TaxonomyState
 
 
 default_meta = [
@@ -54,6 +55,8 @@ def template(
 ) -> Callable[[Callable[[], rx.Component]], rx.Component]:
     def decorator(page_content: Callable[[], rx.Component]) -> rx.Component:
         all_meta = [*default_meta, *(meta or [])]
+        extra = on_load if isinstance(on_load, list) else ([on_load] if on_load is not None else [])
+        page_on_load = [TaxonomyState.load_taxonomy, *extra]  # every page needs the user's categories
 
         def templated_page() -> rx.Component:
             return rx.flex(
@@ -92,7 +95,7 @@ def template(
             description=description,
             meta=all_meta,
             script_tags=script_tags,
-            on_load=on_load,
+            on_load=page_on_load,
         )
         def theme_wrap() -> rx.Component:
             return rx.theme(

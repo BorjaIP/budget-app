@@ -1,6 +1,5 @@
 import math
 
-from dashboard.llm.llm_call import bracket_confidence
 from dashboard.llm.retrieval import SimilarityIndex, confident_match, select_similar
 
 
@@ -36,30 +35,6 @@ def test_without_overlap_the_most_confirmed_labels_are_used():
     assert select_similar("zzz", [], limit=3) == []
 
 
-def _tok(text, logprob):
-    return {"token": text, "logprob": logprob}
-
-
-def test_confidence_is_the_joint_probability_of_the_two_bracketed_tags_only():
-    tokens = [
-        _tok("Based", -2.0),  # before any bracket: ignored
-        _tok("[", math.log(0.9)),
-        _tok("Ocio", math.log(0.8)),
-        _tok("][", math.log(0.9)),
-        _tok("Libros", math.log(0.5)),
-        _tok("]", math.log(0.9)),
-        _tok(" extra", -3.0),  # after the second tag: ignored
-    ]
-
-    assert math.isclose(bracket_confidence(tokens), 0.9 * 0.8 * 0.9 * 0.5 * 0.9, rel_tol=1e-6)
-
-
-def test_confidence_is_none_without_brackets_or_logprobs():
-    assert bracket_confidence([_tok("hello", -0.1)]) is None
-    assert bracket_confidence([]) is None
-    assert bracket_confidence(None) is None
-
-
 def test_similarity_tolerates_typos_and_bank_noise():
     index = SimilarityIndex([_label("Pago Movil En Panaderia Norte, Madrid, Tarj. :*0001"), _label("Gasolinera Ribera")])
 
@@ -78,18 +53,3 @@ def test_confident_match_needs_a_high_score_and_no_disagreeing_rival():
     assert confident_match([(0.95, sure), (0.75, other)]) is None
     assert confident_match([(0.95, sure), (0.75, _label("Panaderia Norte 2", "Gastos diarios", "Comida"))]) is not None
     assert confident_match([]) is None
-
-
-def test_a_small_corpus_keeps_the_generic_examples_and_a_rich_one_does_not():
-    from dashboard.llm.llm_call import RICH_CORPUS, _get_dynamic_examples
-    from dashboard.llm.prompt import STATIC_EXAMPLES
-
-    small = [_label(f"Tienda {i}", "Ocio", "Libros") for i in range(4)]
-    rich = [_label(f"Tienda {i}", "Ocio", "Libros") for i in range(RICH_CORPUS)]
-
-    with_static = _get_dynamic_examples("Tienda 1", labels=small)
-    only_retrieved = _get_dynamic_examples("Tienda 1", labels=rich)
-
-    assert with_static.startswith(STATIC_EXAMPLES)
-    assert "operation: Tienda" in with_static
-    assert "Greenpeace" not in only_retrieved

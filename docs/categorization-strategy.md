@@ -55,6 +55,26 @@ splits; small samples, treat as indicative):
 Mean confidence on right answers was 0.82-0.84 against 0.40-0.45 on wrong ones with the new prompt, so the
 0.6 threshold separates them reasonably on this set. Merchants already in memory are always right by construction.
 
+## A taxonomy the user can change
+
+The categories are data, not code. The model is asked in two constrained steps (category from the names that
+exist, then subcategory of that category, or none) so the prompt grows with the number of names, not with every
+subcategory, and the answer can never be an invalid category. Measured on invented merchants with known categories
+(2 random splits, small samples):
+
+| categories | 3 labeled | 8 labeled | 14 labeled |
+|---|---|---|---|
+| 12 (defaults) | 77.5 % | 70.0 % | 72.2 % |
+| 100, offered whole | 57.5 % | 60.0 % | 61.1 % |
+| 100, with the shortlist | 70.0 % | 70.0 % | 72.2 % |
+
+Offering a 3B model a list of 100 categories costs 12-17 points even when the extra ones are irrelevant; the
+shortlist (categories of similar labels, the most used, and unused ones whose name or description matches) brings
+accuracy back to the 12-category level. Merchant memory and similarity do not depend on the number of categories.
+Cost per call stays around 0.25-0.3 s with the constrained answer; a movement takes two calls (about 1 s).
+Overlapping categories (for example "Frutería" next to "Gastos diarios / Comida") are inherently ambiguous: the
+descriptions the user can add to each category are there to disambiguate them.
+
 ## Known limits (measured)
 
 - Token probabilities are overconfident: in a synthetic test the 3B model answered a wrong category with 0.9

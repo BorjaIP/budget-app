@@ -1,43 +1,15 @@
 import reflex as rx
-from reflex.components.radix.themes.base import LiteralAccentColor
 
 from dashboard.expenses.model import Item
 from dashboard.expenses.state import TableState
-from dashboard.llm.llm_call import CATEGORY_TAXONOMY
-
-
-CATEGORY_COLORS: dict[str, LiteralAccentColor] = {
-    "Deuda": "ruby",
-    "Educación": "indigo",
-    "Ocio": "purple",
-    "Gastos diarios": "amber",
-    "Regalos": "pink",
-    "Salud/médicos": "tomato",
-    "Vivienda": "blue",
-    "Tecnología": "iris",
-    "Transporte": "cyan",
-    "Viajes": "teal",
-    "Servicios básicos": "green",
-    "Otros": "gray",
-}
-
-CATEGORY_NAMES = list(CATEGORY_TAXONOMY.keys())
-
-
-def _color_var_for(category: rx.Var[str | None]) -> rx.Var[str]:
-    """Map a category Var to a Radix color name via rx.match."""
-    cases = []
-    for name, color in CATEGORY_COLORS.items():
-        cases.append((name, color))
-    cases.append("gray")
-    return rx.match(category, *cases)
+from dashboard.taxonomy_state import TaxonomyState
 
 
 def category_badge(item: Item) -> rx.Component:
-    color = _color_var_for(item.category)
+    color = rx.cond(item.category, TaxonomyState.colors[item.category], "gray")
     label = rx.cond(
         item.category,
-        item.category,
+        rx.cond(item.subcategory, item.category + " · " + item.subcategory, item.category),
         rx.cond(TableState.is_categorizing, "Categorizando…", "Sin categorizar"),
     )
     spinner = rx.cond(
@@ -72,35 +44,45 @@ def category_badge(item: Item) -> rx.Component:
             align="start",
             max_width="320px",
         ),
+        on_open_change=lambda _: TaxonomyState.open_picker(item.category, item.subcategory),
     )
 
 
 def _category_picker(item: Item) -> rx.Component:
     return rx.vstack(
         rx.text("Categoría", size="2", weight="medium"),
-        rx.scroll_area(
-            rx.vstack(
-                *[
-                    rx.button(
-                        category,
-                        variant=rx.cond(item.category == category, "solid", "soft"),
-                        color_scheme=CATEGORY_COLORS[category],
-                        size="2",
-                        width="100%",
-                        justify_content="flex-start",
-                        on_click=TableState.update_expense_category(
-                            item.id, category, CATEGORY_TAXONOMY[category][0]
-                        ),
-                    )
-                    for category in CATEGORY_NAMES
-                ],
-                spacing="1",
-                width="100%",
-            ),
-            type="auto",
-            scrollbars="vertical",
-            style={"max_height": "260px"},
+        rx.select(
+            TaxonomyState.categories,
+            value=TaxonomyState.picker_category,
+            on_change=TaxonomyState.set_picker_category,
+            size="2",
             width="100%",
+        ),
+        rx.text("Subcategoría", size="2", weight="medium"),
+        rx.select(
+            TaxonomyState.picker_subcategories,
+            value=TaxonomyState.picker_subcategory,
+            on_change=TaxonomyState.set_picker_subcategory,
+            size="2",
+            width="100%",
+        ),
+        rx.hstack(
+            rx.link("Gestionar categorías", href="/categories", size="1", underline="always"),
+            rx.spacer(),
+            rx.popover.close(
+                rx.button(
+                    "Guardar",
+                    size="2",
+                    color_scheme="gray",
+                    high_contrast=True,
+                    disabled=TaxonomyState.picker_category == "",
+                    on_click=TableState.update_expense_category(
+                        item.id, TaxonomyState.picker_category, TaxonomyState.picker_subcategory
+                    ),
+                ),
+            ),
+            width="100%",
+            align="center",
         ),
         spacing="2",
         width="100%",

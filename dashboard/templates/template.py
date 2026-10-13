@@ -81,7 +81,7 @@ def template(
                 panel_background="solid",
                 accent_color="gray",
                 gray_color="sand",
-                radius="medium",
+                radius="large",
                 scaling="100%",
             )
 

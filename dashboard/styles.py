@@ -2,8 +2,10 @@
 
 import reflex as rx
 
-border_radius = "var(--radius-2)"
-border = f"1px solid {rx.color('gray', 5, True)}"
+border_radius = "0.625rem"
+card_radius = "0.875rem"
+border = f"1px solid {rx.color('gray', 4, True)}"
+card_shadow = "0 1px 2px rgba(0, 0, 0, 0.04)"
 text_color = rx.color("gray", 11)
 sidebar_width = "32em"
 sidebar_content_width = "16em"

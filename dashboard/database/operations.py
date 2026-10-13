@@ -540,6 +540,24 @@ class DatabaseManager:
                 for name, total in sorted(totals.items(), key=lambda kv: kv[1], reverse=True)
             ]
 
+    def get_income_breakdown(
+        self, date_from: str | None = None, date_to: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Income (positive amounts) by category, largest first. Transfers to savings are left out."""
+        with self.get_session() as session:
+            statement = self._without_saving(select(Expense).where(Expense.amount > 0))
+            if date_from:
+                statement = statement.where(Expense.operation_date >= date_from)
+            if date_to:
+                statement = statement.where(Expense.operation_date <= date_to)
+            totals: dict[str, float] = defaultdict(float)
+            for row in session.exec(statement).all():
+                totals[row.category or "Sin categorizar"] += row.amount
+        return [
+            {"name": name, "value": round(total, 2)}
+            for name, total in sorted(totals.items(), key=lambda kv: kv[1], reverse=True)
+        ]
+
     def get_top_concepts(
         self,
         limit: int = 10,

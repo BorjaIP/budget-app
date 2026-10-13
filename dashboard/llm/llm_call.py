@@ -9,10 +9,12 @@ import httpx
 from dashboard.config import settings
 
 from .prompt import PROMPT, STATIC_EXAMPLES
-from .retrieval import select_similar
+from .retrieval import SimilarityIndex, select_similar
 
 logger = logging.getLogger(__name__)
 
+# With at least this many labeled merchants the retrieved examples are enough on their own.
+RICH_CORPUS = 20
 DEFAULT_MODEL = "qwen2.5:3b-instruct"
 
 
@@ -175,14 +177,27 @@ def build_few_shot_examples(rows: list[dict[str, Any]], limit: int = 8, diverse:
     return "\n".join(lines).rstrip()
 
 
-def _get_dynamic_examples(concept: str = "", limit: int = 8) -> str:
-    """Examples from what the user taught the app: the labels most similar to `concept`."""
+def _get_dynamic_examples(
+    concept: str = "",
+    limit: int = 8,
+    labels: list[dict[str, Any]] | None = None,
+    index: SimilarityIndex | None = None,
+) -> str:
+    """Examples from what the user taught the app: the labels most similar to `concept`.
+
+    Callers categorizing many rows pass `labels` and a prebuilt `index` to avoid rebuilding them.
+    """
     try:
         from dashboard.database.operations import db_manager
 
-        labels = db_manager.get_merchant_labels()
+        if labels is None:
+            labels = db_manager.get_merchant_labels()
         if len(labels) >= 3:
-            return build_few_shot_examples(select_similar(concept, labels, limit), limit, diverse=False)
+            retrieved = build_few_shot_examples(select_similar(concept, labels, limit, index), limit, diverse=False)
+            if len(labels) >= RICH_CORPUS or retrieved == STATIC_EXAMPLES:
+                return retrieved
+            # Few labels: keep the generic examples too, with the retrieved ones closest to the question.
+            return STATIC_EXAMPLES + "\n\n" + retrieved.removeprefix("Examples:").lstrip()
         rows = db_manager.get_manually_tagged_examples(limit=limit)
     except Exception:
         return STATIC_EXAMPLES
@@ -244,10 +259,13 @@ async def query_llm(
 
 
 async def categorize_with_confidence(
-    concept: str, model: str = DEFAULT_MODEL
+    concept: str,
+    model: str = DEFAULT_MODEL,
+    labels: list[dict[str, Any]] | None = None,
+    index: SimilarityIndex | None = None,
 ) -> tuple[str, str, float | None]:
     """(category, subcategory, confidence). Confidence is 0 when the answer fell back to Otros/General."""
-    examples = _get_dynamic_examples(concept)
+    examples = _get_dynamic_examples(concept, labels=labels, index=index)
     formatted_prompt = PROMPT.format(examples=examples, variable=concept)
     started = time.perf_counter()
     answer = await query_llm_detailed(formatted_prompt, model=model)

@@ -72,6 +72,16 @@ def expenses() -> rx.Component:
             "Gastos",
             actions=rx.hstack(
                 rx.cond(
+                    TableState.has_results,
+                    rx.button(
+                        "Ver resultados",
+                        variant="ghost",
+                        color_scheme="gray",
+                        size="2",
+                        on_click=TableState.open_results,
+                    ),
+                ),
+                rx.cond(
                     TableState.can_undo_recategorize,
                     rx.button(
                         "Deshacer",

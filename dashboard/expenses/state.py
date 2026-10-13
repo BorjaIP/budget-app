@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import time
 from datetime import datetime
@@ -9,6 +10,7 @@ import reflex as rx
 from dashboard.config import settings as app_settings
 from dashboard.database.operations import db_manager
 from dashboard.expenses.model import Item
+from dashboard.llm.merchant import merchant_key
 from dashboard.utils.file_processor import file_processor
 
 logger = logging.getLogger(__name__)
@@ -75,6 +77,19 @@ def _to_item(expense, search: str = "") -> Item:
     )
 
 
+def _one_per_merchant(expenses: list) -> list[Item]:
+    """Review list: the most doubtful movement of each merchant, with how many share it."""
+    groups: dict[str, list] = {}
+    for expense in expenses:  # already ordered most doubtful first
+        groups.setdefault(merchant_key(expense.concept) or f"id-{expense.id}", []).append(expense)
+    items = []
+    for group in groups.values():
+        item = _to_item(group[0])
+        item.repeat_count = len(group)
+        items.append(item)
+    return items
+
+
 class TableState(rx.State):
     items: List[Item] = []
     items_list: List[str] = []
@@ -105,6 +120,16 @@ class TableState(rx.State):
     categorization_progress: int = 0
     categorization_total: int = 0
     can_undo_recategorize: bool = False
+    has_results: bool = False
+    show_results: bool = False
+    results_total: int = 0
+    results_memory: int = 0
+    results_similar: int = 0
+    results_high: int = 0
+    results_mid: int = 0
+    results_low: int = 0
+    results_average: str = "-"
+    review_items: list[Item] = []
     show_recategorize_dialog: bool = False
     recategorize_auto_count: int = 0
     recategorize_manual_count: int = 0
@@ -401,6 +426,7 @@ class TableState(rx.State):
         if not ok:
             return rx.toast.error("No se pudo actualizar la categoría")
         applied = db_manager.learn_from_correction(expense_id)
+        self._drop_reviewed(expense_id)
         message = f"Categoría actualizada a {category}"
         if applied:
             message += f" y aplicada a {applied} movimientos del mismo comercio"
@@ -503,18 +529,28 @@ class TableState(rx.State):
 
     @rx.event(background=True)
     async def categorize_pending_expenses(self):
+        """Categorize pending movements in the background, cheapest method first.
+
+        1. merchant memory (exact merchant the user already corrected), 2. very similar labeled
+        movement, 3. the local model with the most similar labeled examples. Blocking database
+        work runs in threads so the app stays usable on every page while this goes on.
+        """
         from dashboard.llm.llm_call import categorize_with_confidence
-        from dashboard.llm.merchant import merchant_key
+        from dashboard.llm.retrieval import SimilarityIndex, confident_match
         from dashboard.llm.run_stats import RunStats
 
         stats = RunStats()
+        run_ids: list[int] = []
 
         async with self:
             self.is_categorizing = True
             self.categorization_progress = 0
-            pending = db_manager.get_uncategorized_expenses(limit=500)
+            self.has_results = False
+            pending = await asyncio.to_thread(db_manager.get_uncategorized_expenses, 500)
             self.categorization_total = len(pending)
-        learned = db_manager.sync_merchant_memory()
+        learned = await asyncio.to_thread(db_manager.sync_merchant_memory)
+        labels = await asyncio.to_thread(db_manager.get_merchant_labels)
+        index = SimilarityIndex(labels)
         logger.info("categorization run started: %d movements pending (%d labels backfilled)", len(pending), learned)
 
         if not pending:
@@ -523,54 +559,99 @@ class TableState(rx.State):
             return
 
         assigned = 0
-        for index, expense in enumerate(pending):
+        for position, expense in enumerate(pending):
             started = time.perf_counter()
-            remembered = db_manager.get_merchant_label(merchant_key(expense.concept))
-            if remembered:  # the user already taught the app this merchant: no model call, same answer every time
+            remembered = await asyncio.to_thread(db_manager.get_merchant_label, merchant_key(expense.concept))
+            match = None if remembered else confident_match(index.search(expense.concept, 3))
+            if remembered:  # the user already taught the app this merchant: same answer every time
                 stats.record_memory()
-                db_manager.update_category(
-                    expense.id, remembered["category"], remembered["subcategory"], source="memory"
+                await asyncio.to_thread(
+                    db_manager.update_category,
+                    expense.id, remembered["category"], remembered["subcategory"], "memory",
                 )
-                assigned += 1
-                async with self:
-                    self.categorization_progress = index + 1
-                continue
-            try:
-                category, subcategory, confidence = await categorize_with_confidence(expense.concept)
-            except Exception:
-                stats.record_error()
-                logger.exception("The local model is not available")
-                logger.info(stats.summary())
-                async with self:
-                    self.is_categorizing = False
-                yield rx.toast.warning(
-                    "El modelo local no está disponible. Las filas restantes quedan sin categorizar."
+            elif match:  # looks almost exactly like something the user labeled
+                score, label = match
+                stats.record_similar()
+                await asyncio.to_thread(
+                    db_manager.update_category,
+                    expense.id, label["category"], label["subcategory"], "similar", score,
                 )
-                return
-
-            stats.record(category, subcategory, (time.perf_counter() - started) * 1000, confidence)
-            db_manager.update_category(
-                expense.id, category, subcategory, source="llm", confidence=confidence if confidence is not None else 0.0
-            )
-            if category:
-                assigned += 1
+            else:
+                try:
+                    category, subcategory, confidence = await categorize_with_confidence(
+                        expense.concept, labels=labels, index=index
+                    )
+                except Exception:
+                    stats.record_error()
+                    logger.exception("The local model is not available")
+                    logger.info(stats.summary())
+                    async with self:
+                        self.is_categorizing = False
+                    yield rx.toast.warning(
+                        "El modelo local no está disponible. Las filas restantes quedan sin categorizar."
+                    )
+                    return
+                stats.record(category, subcategory, (time.perf_counter() - started) * 1000, confidence)
+                await asyncio.to_thread(
+                    db_manager.update_category,
+                    expense.id, category, subcategory, "llm", confidence if confidence is not None else 0.0,
+                )
+            assigned += 1
+            run_ids.append(expense.id)
 
             async with self:
-                self.categorization_progress = index + 1
-                if (index + 1) % 5 == 0 or (index + 1) == len(pending):
+                self.categorization_progress = position + 1
+                if (position + 1) % 10 == 0:
                     self.load_entries_from_database()
 
+        doubtful = await asyncio.to_thread(db_manager.get_expenses_by_ids, run_ids)
+        doubtful = sorted(
+            (e for e in doubtful if _to_item(e).needs_review), key=lambda e: e.category_confidence or 0.0
+        )
+        review_items = _one_per_merchant(doubtful)[:50]
         async with self:
             self.is_categorizing = False
             self.load_entries_from_database()
-        async with self:
             self.can_undo_recategorize = self.router.session.client_token in _UNDO_SNAPSHOTS
+            self.results_total = assigned
+            self.results_memory = stats.from_memory
+            self.results_similar = stats.from_similar
+            self.results_high = stats.high_confidence
+            self.results_mid = stats.mid_confidence
+            self.results_low = stats.low_confidence
+            average = stats.average_confidence
+            self.results_average = f"{average * 100:.0f} %" if average is not None else "-"
+            self.review_items = review_items
+            self.has_results = True
+            self.show_results = True
         logger.info(stats.summary())
-        left = len(pending) - assigned
-        message = f"Categorizados {assigned} de {len(pending)} movimientos."
-        if left:
-            message += f" {left} quedan sin categorizar; puedes asignarlos a mano."
-        yield rx.toast.success(message)
+
+    @rx.event
+    def set_show_results(self, value: bool):
+        self.show_results = value
+
+    def open_results(self):
+        self.show_results = True
+
+    def confirm_review_item(self, expense_id: int):
+        """The user checked the model's category and it is right: keep it as a hand-made label."""
+        item = next((i for i in self.review_items if i.id == expense_id), None)
+        if item is None or not item.category:
+            return
+        db_manager.update_category(expense_id, item.category, item.subcategory, source="manual")
+        db_manager.learn_from_correction(expense_id)
+        self._drop_reviewed(expense_id, item.concept)
+        self.load_entries_from_database()
+
+    def _drop_reviewed(self, expense_id: int, concept: str | None = None):
+        """A reviewed merchant leaves the list: its other movements were updated with it."""
+        if concept is None:
+            item = next((i for i in self.review_items if i.id == expense_id), None)
+            concept = item.concept if item else None
+        key = merchant_key(concept) if concept else ""
+        self.review_items = [
+            i for i in self.review_items if i.id != expense_id and not (key and merchant_key(i.concept) == key)
+        ]
 
     def undo_recategorize(self):
         snapshot = _UNDO_SNAPSHOTS.pop(self.router.session.client_token, None)

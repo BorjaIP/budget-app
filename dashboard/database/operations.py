@@ -175,6 +175,12 @@ class DatabaseManager:
             & (Expense.category_confidence < settings.llm_confidence_threshold),
         )
 
+    def get_expenses_by_ids(self, ids: list[int]) -> list[Expense]:
+        if not ids:
+            return []
+        with self.get_session() as session:
+            return list(session.exec(select(Expense).where(Expense.id.in_(ids))).all())  # type: ignore[attr-defined]
+
     def count_to_review(self) -> int:
         with self.get_session() as session:
             statement = select(func.count()).select_from(Expense).where(self._needs_review_clause())

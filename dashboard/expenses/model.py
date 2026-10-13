@@ -22,4 +22,5 @@ class Item(pydantic.BaseModel):
     is_categorized: bool = False
     concept_segments: list[dict] = []
     needs_review: bool = False
+    repeat_count: int = 1
     source: Optional[str] = None

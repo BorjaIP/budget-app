@@ -1,7 +1,7 @@
 import math
 
 from dashboard.llm.llm_call import bracket_confidence
-from dashboard.llm.retrieval import select_similar
+from dashboard.llm.retrieval import SimilarityIndex, confident_match, select_similar
 
 
 def _label(concept, category="Ocio", sub="Libros", confirmations=1):
@@ -58,3 +58,38 @@ def test_confidence_is_none_without_brackets_or_logprobs():
     assert bracket_confidence([_tok("hello", -0.1)]) is None
     assert bracket_confidence([]) is None
     assert bracket_confidence(None) is None
+
+
+def test_similarity_tolerates_typos_and_bank_noise():
+    index = SimilarityIndex([_label("Pago Movil En Panaderia Norte, Madrid, Tarj. :*0001"), _label("Gasolinera Ribera")])
+
+    score, best = index.search("Compra Panadria Norte 0425", k=1)[0]
+
+    assert best["concept"].startswith("Pago Movil En Panaderia Norte")
+    assert score > 0.7
+
+
+def test_confident_match_needs_a_high_score_and_no_disagreeing_rival():
+    sure = _label("Panaderia Norte", "Gastos diarios", "Comida")
+    other = _label("Panaderia Norte Sur", "Ocio", "Libros")
+
+    assert confident_match([(0.95, sure)])[1] is sure
+    assert confident_match([(0.80, sure)]) is None
+    assert confident_match([(0.95, sure), (0.75, other)]) is None
+    assert confident_match([(0.95, sure), (0.75, _label("Panaderia Norte 2", "Gastos diarios", "Comida"))]) is not None
+    assert confident_match([]) is None
+
+
+def test_a_small_corpus_keeps_the_generic_examples_and_a_rich_one_does_not():
+    from dashboard.llm.llm_call import RICH_CORPUS, _get_dynamic_examples
+    from dashboard.llm.prompt import STATIC_EXAMPLES
+
+    small = [_label(f"Tienda {i}", "Ocio", "Libros") for i in range(4)]
+    rich = [_label(f"Tienda {i}", "Ocio", "Libros") for i in range(RICH_CORPUS)]
+
+    with_static = _get_dynamic_examples("Tienda 1", labels=small)
+    only_retrieved = _get_dynamic_examples("Tienda 1", labels=rich)
+
+    assert with_static.startswith(STATIC_EXAMPLES)
+    assert "operation: Tienda" in with_static
+    assert "Greenpeace" not in only_retrieved

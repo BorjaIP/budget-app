@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
+from pydantic import NaiveDatetime
 from sqlmodel import Field, SQLModel
 
 
@@ -20,7 +21,7 @@ class ExpenseBase(SQLModel):
 class Expense(ExpenseBase, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     dedupe_hash: str = Field(unique=True, index=True)
-    created_at: datetime = Field(default_factory=datetime.now)
+    created_at: NaiveDatetime = Field(default_factory=datetime.now)
     file_source: Optional[str] = Field(default=None)
 
 

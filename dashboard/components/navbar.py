@@ -3,6 +3,7 @@
 import reflex as rx
 
 from .. import styles
+from .color_mode_toggle import color_mode_toggle
 
 
 def navbar() -> rx.Component:
@@ -10,11 +11,7 @@ def navbar() -> rx.Component:
         rx.hstack(
             rx.heading("Mi presupuesto", size="3", weight="medium", letter_spacing="-0.01em"),
             rx.spacer(),
-            rx.color_mode.button(
-                variant="ghost",
-                color_scheme="gray",
-                custom_attrs={"aria-label": "Cambiar entre modo claro y oscuro"},
-            ),
+            color_mode_toggle(),
             align="center",
             width="100%",
             padding_y="0.75em",

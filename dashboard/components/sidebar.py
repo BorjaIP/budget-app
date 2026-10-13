@@ -3,6 +3,8 @@
 import reflex as rx
 
 from .. import styles
+from .color_mode_toggle import color_mode_toggle
+from .icon import icon
 from .nav_items import NAV_ITEMS, is_active
 
 
@@ -19,11 +21,7 @@ def _header() -> rx.Component:
 
 def _footer() -> rx.Component:
     return rx.hstack(
-        rx.color_mode.button(
-            variant="ghost",
-            color_scheme="gray",
-            custom_attrs={"aria-label": "Cambiar entre modo claro y oscuro"},
-        ),
+        color_mode_toggle(),
         rx.spacer(),
         align="center",
         width="100%",
@@ -31,11 +29,11 @@ def _footer() -> rx.Component:
     )
 
 
-def _item(href: str, label: str, icon: str) -> rx.Component:
+def _item(href: str, label: str, glyph: str) -> rx.Component:
     active = is_active(href)
     return rx.link(
         rx.hstack(
-            rx.icon(icon, size=16),
+            icon(glyph, size=16),
             rx.text(label, size="2"),
             color=rx.cond(active, rx.color("gray", 12), styles.text_color),
             font_weight=rx.cond(active, "500", "400"),

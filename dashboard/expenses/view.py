@@ -2,6 +2,7 @@ import reflex as rx
 
 from dashboard.components.category_badge import CATEGORY_NAMES, category_badge
 from dashboard.components.empty_state import empty_state
+from dashboard.components.icon import icon
 from dashboard.expenses.model import Item
 from dashboard.expenses.state import TableState
 
@@ -44,7 +45,7 @@ def _delete_action(item: Item) -> rx.Component:
     return rx.alert_dialog.root(
         rx.alert_dialog.trigger(
             rx.icon_button(
-                rx.icon("trash-2", size=14),
+                icon("trash-2", size=14),
                 variant="ghost",
                 color_scheme="gray",
                 size="1",
@@ -308,10 +309,10 @@ def _summary_line() -> rx.Component:
 
 def _search_input() -> rx.Component:
     return rx.input(
-        rx.input.slot(rx.icon("search", size=16)),
+        rx.input.slot(icon("search", size=16)),
         rx.input.slot(
             rx.icon_button(
-                rx.icon("x", size=14),
+                icon("x", size=14),
                 variant="ghost",
                 color_scheme="gray",
                 size="1",
@@ -404,7 +405,7 @@ def _toolbar() -> rx.Component:
             rx.cond(
                 TableState.sort_reverse,
                 rx.icon_button(
-                    rx.icon("arrow-down-z-a", size=16),
+                    icon("arrow-down-z-a", size=16),
                     variant="ghost",
                     color_scheme="gray",
                     size="2",
@@ -413,7 +414,7 @@ def _toolbar() -> rx.Component:
                     custom_attrs={"aria-label": "Orden descendente, pulsa para invertir"},
                 ),
                 rx.icon_button(
-                    rx.icon("arrow-down-a-z", size=16),
+                    icon("arrow-down-a-z", size=16),
                     variant="ghost",
                     color_scheme="gray",
                     size="2",
@@ -481,9 +482,9 @@ def _categorization_progress() -> rx.Component:
     )
 
 
-def _page_button(icon: str, label: str, handler, disabled) -> rx.Component:
+def _page_button(glyph: str, label: str, handler, disabled) -> rx.Component:
     return rx.icon_button(
-        rx.icon(icon, size=16),
+        icon(glyph, size=16),
         variant="soft",
         color_scheme="gray",
         size="2",
@@ -536,7 +537,7 @@ def _upload_modal() -> rx.Component:
                 ),
                 rx.upload(
                     rx.vstack(
-                        rx.icon("cloud-upload", size=24, color=rx.color("gray", 10)),
+                        icon("cloud-upload", size=24, color=rx.color("gray", 10)),
                         rx.text(
                             rx.cond(
                                 TableState.is_uploading,

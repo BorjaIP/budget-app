@@ -1,14 +1,15 @@
 import reflex as rx
 
 from .. import styles
+from .icon import icon
 from .nav_items import NAV_ITEMS, is_active
 
 
-def _item(href: str, label: str, icon: str) -> rx.Component:
+def _item(href: str, label: str, glyph: str) -> rx.Component:
     active = is_active(href)
     return rx.link(
         rx.vstack(
-            rx.icon(icon, size=20),
+            icon(glyph, size=20),
             rx.text(label, size="1"),
             spacing="1",
             align="center",

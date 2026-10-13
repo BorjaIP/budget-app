@@ -2,6 +2,7 @@ import reflex as rx
 from reflex.components.radix.themes.base import LiteralAccentColor, LiteralGrayColor
 
 from .. import styles
+from ..components.icon import icon
 from ..templates.template import ThemeState
 
 
@@ -29,7 +30,7 @@ def _swatch(option: list, current_value, event) -> rx.Component:
     selected = name.lower() == current_value.lower()
     return rx.tooltip(
         rx.el.button(
-            rx.cond(selected, rx.icon("check", size=14, color=rx.color("gray", 1)), rx.fragment()),
+            rx.cond(selected, icon("check", size=14, color=rx.color("gray", 1)), rx.fragment()),
             type="button",
             on_click=event(name.lower()),
             style={

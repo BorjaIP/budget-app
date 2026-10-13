@@ -1,17 +1,17 @@
 import reflex as rx
 
-from .. import styles
+from .icon import icon
 
 
 def empty_state(
-    icon: str,
+    glyph: str,
     title: str,
     description: str,
     action_label: str | None = None,
     on_action=None,
 ) -> rx.Component:
     body = [
-        rx.icon(icon, size=20, color=rx.color("gray", 9)),
+        icon(glyph, size=20, color=rx.color("gray", 9)),
         rx.heading(title, as_="h2", size="4", weight="medium"),
         rx.text(
             description,

@@ -6,6 +6,21 @@ from dashboard.expenses.view import main_table
 from dashboard.templates import template
 
 
+# "/" jumps to the search box unless the user is already typing somewhere.
+_SLASH_FOCUS = """
+if (!window.__budgetSlashFocus) {
+  window.__budgetSlashFocus = true;
+  document.addEventListener('keydown', (e) => {
+    const tag = (e.target && e.target.tagName) || '';
+    if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(tag) || (e.target && e.target.isContentEditable)) return;
+    const box = document.getElementById('search-input');
+    if (box) { e.preventDefault(); box.focus(); }
+  });
+}
+"""
+
+
 @template(route="/expenses", title="Gastos", on_load=TableState.load_entries_from_database)
 def expenses() -> rx.Component:
     return rx.vstack(
@@ -36,6 +51,7 @@ def expenses() -> rx.Component:
             ),
         ),
         main_table(),
+        rx.script(_SLASH_FOCUS),
         spacing="5",
         width="100%",
     )

@@ -81,12 +81,37 @@ def _header_cell(text: str, end: bool = False) -> rx.Component:
     return rx.table.column_header_cell(text, justify="end" if end else "start")
 
 
+def _concept_text(item: Item) -> rx.Component:
+    """Concept with the searched term highlighted."""
+    return rx.text(
+        rx.foreach(
+            item.concept_segments,
+            lambda seg: rx.cond(
+                seg["m"],
+                rx.el.mark(seg["t"], style={"background": "var(--gray-a5)", "color": "inherit", "border_radius": "2px"}),
+                seg["t"],
+            ),
+        ),
+        weight="medium",
+        style={**_TRUNCATE, "max_width": "28em"},
+    )
+
+
+def _select_box(item: Item) -> rx.Component:
+    return rx.checkbox(
+        checked=TableState.selected_ids.contains(item.id),
+        on_change=lambda _: TableState.toggle_selected(item.id),
+        size="2",
+        color_scheme="gray",
+        custom_attrs={"aria-label": "Seleccionar movimiento"},
+    )
+
+
 def _row(item: Item) -> rx.Component:
     return rx.table.row(
+        rx.table.cell(_select_box(item), width="2.5em"),
         rx.table.cell(rx.text(item.operation_date_human, class_name="num", white_space="nowrap")),
-        rx.table.cell(
-            rx.text(item.concept, weight="medium", style={**_TRUNCATE, "max_width": "28em"}),
-        ),
+        rx.table.cell(_concept_text(item)),
         rx.table.cell(category_badge(item)),
         rx.table.cell(_amount_text(item), justify="end"),
         rx.table.cell(_balance_text(item), justify="end"),
@@ -136,6 +161,16 @@ def _table() -> rx.Component:
     return rx.table.root(
         rx.table.header(
             rx.table.row(
+                rx.table.column_header_cell(
+                    rx.checkbox(
+                        checked=TableState.page_all_selected,
+                        on_change=lambda _: TableState.toggle_page_selection(),
+                        size="2",
+                        color_scheme="gray",
+                        custom_attrs={"aria-label": "Seleccionar todos los movimientos de la página"},
+                    ),
+                    width="2.5em",
+                ),
                 _header_cell("Fecha"),
                 _header_cell("Concepto"),
                 _header_cell("Categoría"),
@@ -149,7 +184,7 @@ def _table() -> rx.Component:
             rx.foreach(TableState.items, _row),
         ),
         variant="surface",
-        size="2",
+        size="1",
         width="100%",
     )
 
@@ -322,7 +357,8 @@ def _search_input() -> rx.Component:
             display=rx.cond(TableState.search_value, "flex", "none"),
         ),
         value=TableState.search_value,
-        placeholder="Buscar concepto...",
+        id="search-input",
+        placeholder="Buscar concepto (pulsa /)",
         on_change=TableState.set_search,
         size="2",
         flex="1",
@@ -447,6 +483,7 @@ def _toolbar() -> rx.Component:
                 color_scheme="gray",
                 size="2",
                 on_click=TableState.export_csv,
+                flex=["1", "1", "none"],
             ),
             rx.button(
                 "Subir archivo",
@@ -454,13 +491,50 @@ def _toolbar() -> rx.Component:
                 color_scheme="gray",
                 high_contrast=True,
                 on_click=TableState.open_upload_modal,
+                flex=["1", "1", "none"],
             ),
             spacing="2",
+            width=["100%", "100%", "auto"],
         ),
         wrap="wrap",
         align="center",
         gap="0.75rem",
         width="100%",
+    )
+
+
+def _bulk_bar() -> rx.Component:
+    return rx.cond(
+        TableState.selected_count > 0,
+        rx.flex(
+            rx.text(
+                rx.text.strong(TableState.selected_count, class_name="num"),
+                " seleccionados",
+                size="2",
+            ),
+            rx.select(
+                CATEGORY_NAMES,
+                placeholder="Asignar categoría",
+                on_change=TableState.apply_bulk_category,
+                size="2",
+                custom_attrs={"aria-label": "Asignar categoría a los seleccionados"},
+            ),
+            rx.button(
+                "Quitar selección",
+                variant="ghost",
+                color_scheme="gray",
+                size="2",
+                on_click=TableState.clear_selection,
+            ),
+            align="center",
+            wrap="wrap",
+            gap="0.75rem",
+            padding="0.5rem 0.75rem",
+            border=f"1px solid {rx.color('gray', 6, True)}",
+            border_radius="var(--radius-3)",
+            width="100%",
+            custom_attrs={"role": "status"},
+        ),
     )
 
 
@@ -697,6 +771,7 @@ def main_table() -> rx.Component:
     return rx.vstack(
         _toolbar(),
         _filters(),
+        _bulk_bar(),
         _categorization_progress(),
         _upload_modal(),
         _table_or_empty(),

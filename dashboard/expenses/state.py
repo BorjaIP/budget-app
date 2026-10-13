@@ -29,7 +29,23 @@ def _humanize_date(iso: str) -> str:
         return iso
 
 
-def _to_item(expense) -> Item:
+def highlight_segments(text: str, term: str) -> list[dict]:
+    """Split `text` into pieces flagged `m` when they match `term` (case-insensitive)."""
+    if not term:
+        return [{"t": text, "m": False}]
+    lower, needle = text.lower(), term.lower()
+    pieces, start = [], 0
+    while (hit := lower.find(needle, start)) != -1:
+        if hit > start:
+            pieces.append({"t": text[start:hit], "m": False})
+        pieces.append({"t": text[hit : hit + len(needle)], "m": True})
+        start = hit + len(needle)
+    if start < len(text):
+        pieces.append({"t": text[start:], "m": False})
+    return pieces or [{"t": text, "m": False}]
+
+
+def _to_item(expense, search: str = "") -> Item:
     amount = float(expense.amount)
     balance = float(expense.balance)
     return Item(
@@ -47,6 +63,7 @@ def _to_item(expense) -> Item:
         subcategory=expense.subcategory,
         bank_name=expense.bank_name,
         is_categorized=bool(expense.is_categorized),
+        concept_segments=highlight_segments(expense.concept, search.strip()),
     )
 
 
@@ -80,6 +97,7 @@ class TableState(rx.State):
     categorization_progress: int = 0
     categorization_total: int = 0
     can_undo_recategorize: bool = False
+    selected_ids: list[int] = []
 
     selected_categories: list[str] = []
     selected_banks: list[str] = []
@@ -88,6 +106,14 @@ class TableState(rx.State):
     amount_min: str = ""
     amount_max: str = ""
     flow_filter: str = "all"  # all | income | expense
+
+    @rx.var(cache=True)
+    def selected_count(self) -> int:
+        return len(self.selected_ids)
+
+    @rx.var(cache=True)
+    def page_all_selected(self) -> bool:
+        return bool(self.items) and all(item.id in self.selected_ids for item in self.items)
 
     @rx.var(cache=True)
     def filtered_count(self) -> int:
@@ -185,7 +211,7 @@ class TableState(rx.State):
                 sort=self.sort_value,
                 sort_dir="desc" if self.sort_reverse else "asc",
             )
-            self.items = [_to_item(r) for r in rows]
+            self.items = [_to_item(r, self.search_value) for r in rows]
             self.total_items = total
             self.items_list = [
                 "operation_date",
@@ -297,6 +323,13 @@ class TableState(rx.State):
         self.offset = 0
         return TableState.load_entries_from_database
 
+    def drill_down_search(self, text: str, date_from: str, date_to: str):
+        """Arrive from the overview with a concept search and period already applied."""
+        self.drill_down("", date_from, date_to, "expense")
+        self.selected_categories = []
+        self.search_value = text
+        return TableState.load_entries_from_database
+
     def clear_filters(self):
         self.search_value = ""
         self.selected_categories = []
@@ -308,6 +341,31 @@ class TableState(rx.State):
         self.flow_filter = "all"
         self.offset = 0
         return TableState.load_entries_from_database
+
+    def toggle_selected(self, expense_id: int):
+        if expense_id in self.selected_ids:
+            self.selected_ids = [i for i in self.selected_ids if i != expense_id]
+        else:
+            self.selected_ids = [*self.selected_ids, expense_id]
+
+    def toggle_page_selection(self):
+        page_ids = [item.id for item in self.items]
+        if page_ids and all(i in self.selected_ids for i in page_ids):
+            self.selected_ids = [i for i in self.selected_ids if i not in page_ids]
+        else:
+            self.selected_ids = [*self.selected_ids, *[i for i in page_ids if i not in self.selected_ids]]
+
+    def clear_selection(self):
+        self.selected_ids = []
+
+    def apply_bulk_category(self, category: str):
+        """Tag every selected movement by hand; manual tags feed the few-shot prompt."""
+        if not self.selected_ids or not category:
+            return
+        done = sum(db_manager.update_category(i, category, None, source="manual") for i in self.selected_ids)
+        self.selected_ids = []
+        self.load_entries_from_database()
+        return rx.toast.success(f"{done} movimientos asignados a {category}")
 
     def update_expense_category(self, expense_id: int, category: str, subcategory: str = ""):
         ok = db_manager.update_category(expense_id, category, subcategory or None, source="manual")

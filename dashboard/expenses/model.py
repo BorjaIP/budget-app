@@ -20,3 +20,4 @@ class Item(pydantic.BaseModel):
     subcategory: Optional[str] = None
     bank_name: Optional[str] = None
     is_categorized: bool = False
+    concept_segments: list[dict] = []

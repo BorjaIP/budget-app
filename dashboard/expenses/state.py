@@ -397,6 +397,10 @@ class TableState(rx.State):
     def close_upload_modal(self):
         self.show_upload_modal = False
 
+    @rx.event
+    def set_show_upload_modal(self, value: bool):
+        self.show_upload_modal = value
+
     def set_pending_bank_name(self, value: str):
         self.pending_bank_name = value
 

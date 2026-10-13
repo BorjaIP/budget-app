@@ -1,9 +1,9 @@
 from typing import Optional
 
-import reflex as rx
+import pydantic
 
 
-class Item(rx.Base):
+class Item(pydantic.BaseModel):
     """UI representation of an expense row."""
 
     id: int = 0

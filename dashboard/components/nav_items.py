@@ -4,7 +4,7 @@ import reflex as rx
 
 NAV_ITEMS = [
     ("/", "Resumen", "home"),
-    ("/expenses", "Gastos", "receipt"),
+    ("/transactions", "Transacciones", "receipt"),
     ("/budgets", "Presupuestos", "pie-chart"),
     ("/comparison", "Comparativa", "calendar-range"),
     ("/settings", "Ajustes", "settings"),

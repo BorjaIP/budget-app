@@ -2,14 +2,14 @@
 # Render the app with synthetic data in a throwaway copy and save screenshots.
 # Never touches the real database. Needs docker (official Playwright image) and network on first run.
 #
-# Usage: scripts/ui_preview.sh <out-dir> [route ...]    (default routes: / /expenses /settings /about)
+# Usage: scripts/ui_preview.sh <out-dir> [route ...]    (default routes: / /transactions /settings /about)
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$(realpath -m "${1:?usage: ui_preview.sh <out-dir> [route ...]}")"
 shift || true
 ROUTES=("$@")
-[ "${#ROUTES[@]}" -gt 0 ] || ROUTES=(/ /expenses /settings /about)
+[ "${#ROUTES[@]}" -gt 0 ] || ROUTES=(/ /transactions /settings /about)
 
 PREVIEW="${PREVIEW_DIR:-$HOME/.cache/budget-app-ui-preview}"
 FRONT=3100

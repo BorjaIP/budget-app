@@ -31,6 +31,9 @@ SORTABLE_COLUMNS = {
 }
 
 
+MAX_NOTE_LENGTH = 500
+
+
 class DatabaseManager:
     def __init__(self, database_url: str | None = None):
         self.database_url = database_url or settings.database_url
@@ -57,7 +60,7 @@ class DatabaseManager:
     # Columns added after the first release: table -> {column: SQL type and default}. `create_all` only creates
     # missing tables, and this repo has no Alembic, so add them to existing tables here (SQLite and PostgreSQL).
     _ADDED_COLUMNS = {
-        "expense": {"category_source": "TEXT", "category_confidence": "FLOAT"},
+        "expense": {"category_source": "TEXT", "category_confidence": "FLOAT", "note": "TEXT"},
         "category": {"kind": "TEXT DEFAULT 'expense'"},
     }
 
@@ -209,7 +212,10 @@ class DatabaseManager:
             filters = []
             if search:
                 like = f"%{search.lower()}%"
-                filters.append(func.lower(Expense.concept).like(like))
+                filters.append(
+                    func.lower(Expense.concept).like(like)
+                    | func.lower(func.coalesce(Expense.note, "")).like(like)  # the user's notes are searchable too
+                )
             if categories:
                 if "Sin categorizar" in categories:
                     rest = [c for c in categories if c != "Sin categorizar"]
@@ -276,6 +282,22 @@ class DatabaseManager:
         with self.get_session() as session:
             statement = select(func.count()).select_from(Expense).where(self._needs_review_clause())
             return int(session.exec(statement).one())
+
+    def get_expense(self, expense_id: int) -> Expense | None:
+        with self.get_session() as session:
+            return session.get(Expense, expense_id)
+
+    def update_note(self, expense_id: int, note: str | None) -> bool:
+        """Store the user's note of a transaction; empty text removes it."""
+        text = (note or "").strip()[:MAX_NOTE_LENGTH]
+        with self.get_session() as session:
+            expense = session.get(Expense, expense_id)
+            if expense is None:
+                return False
+            expense.note = text or None
+            session.add(expense)
+            session.commit()
+            return True
 
     def get_uncategorized_expenses(self, limit: int = 500) -> list[Expense]:
         with self.get_session() as session:

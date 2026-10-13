@@ -50,6 +50,21 @@ def highlight_segments(text: str, term: str) -> list[dict]:
     return pieces or [{"t": text, "m": False}]
 
 
+def source_text(source: str | None, confidence: float | None) -> str:
+    """How a transaction got its category, in words the user understands."""
+    if source == "manual":
+        return "Categorizada por ti"
+    if source == "memory":
+        return "Regla aprendida de tus correcciones"
+    if source == "similar":
+        pct = f" ({confidence * 100:.0f} % parecida)" if confidence else ""
+        return "Parecida a otra que ya etiquetaste" + pct
+    if source == "llm":
+        pct = f" (confianza {confidence * 100:.0f} %)" if confidence else ""
+        return "Modelo local" + pct
+    return "Sin categorizar"
+
+
 def _to_item(expense, search: str = "") -> Item:
     amount = float(expense.amount)
     balance = float(expense.balance)
@@ -69,6 +84,9 @@ def _to_item(expense, search: str = "") -> Item:
         bank_name=expense.bank_name,
         is_categorized=bool(expense.is_categorized),
         source=expense.category_source,
+        note=expense.note or "",
+        value_date_human=_humanize_date(expense.value_date),
+        source_text=source_text(expense.category_source, expense.category_confidence),
         needs_review=(
             expense.category_source == "llm"
             and expense.category_confidence is not None
@@ -135,6 +153,9 @@ class TableState(rx.State):
     recategorize_auto_count: int = 0
     recategorize_manual_count: int = 0
     selected_ids: list[int] = []
+    show_detail: bool = False
+    detail: Item = Item()
+    detail_note: str = ""
 
     selected_categories: list[str] = []
     selected_banks: list[str] = []
@@ -390,6 +411,36 @@ class TableState(rx.State):
         self.offset = 0
         return TableState.load_entries_from_database
 
+    # -------------------------------------------------------------- detail
+    def open_detail(self, expense_id: int):
+        self._load_detail(expense_id)
+        self.show_detail = self.detail.id == expense_id
+
+    def _load_detail(self, expense_id: int):
+        expense = db_manager.get_expense(expense_id)
+        if expense is not None:
+            self.detail = _to_item(expense)
+            self.detail_note = self.detail.note
+
+    @rx.event
+    def set_show_detail(self, value: bool):
+        self.show_detail = value
+
+    @rx.event
+    def set_detail_note(self, value: str):
+        self.detail_note = value
+
+    @rx.var(cache=True)
+    def detail_note_changed(self) -> bool:
+        return self.detail_note.strip() != self.detail.note
+
+    def save_note(self):
+        if not db_manager.update_note(self.detail.id, self.detail_note):
+            return rx.toast.error("No se pudo guardar la nota")
+        self._load_detail(self.detail.id)
+        self.load_entries_from_database()
+        return rx.toast.success("Nota guardada")
+
     def toggle_selected(self, expense_id: int):
         if expense_id in self.selected_ids:
             self.selected_ids = [i for i in self.selected_ids if i != expense_id]
@@ -429,6 +480,8 @@ class TableState(rx.State):
             return rx.toast.error("No se pudo actualizar la categoría")
         applied = db_manager.learn_from_correction(expense_id)
         self._drop_reviewed(expense_id)
+        if self.show_detail and self.detail.id == expense_id:
+            self._load_detail(expense_id)
         message = f"Categoría actualizada a {category}"
         if applied:
             message += f" y aplicada a {applied} movimientos del mismo comercio"
@@ -735,6 +788,7 @@ class TableState(rx.State):
             amount_min=self._safe_float(self.amount_min),
             amount_max=self._safe_float(self.amount_max),
             flow=self.flow_filter,
+            review_only=self.review_only,
             sort=self.sort_value,
             sort_dir="desc" if self.sort_reverse else "asc",
         )
@@ -751,6 +805,7 @@ class TableState(rx.State):
                 "category",
                 "subcategory",
                 "bank_name",
+                "note",
             ]
         )
         for r in rows:
@@ -764,7 +819,8 @@ class TableState(rx.State):
                     r.category or "",
                     r.subcategory or "",
                     r.bank_name or "",
+                    r.note or "",
                 ]
             )
-        filename = f"gastos_{datetime.now().strftime('%Y%m%d')}.csv"
+        filename = f"transacciones_{datetime.now().strftime('%Y%m%d')}.csv"
         return rx.download(data=buf.getvalue().encode("utf-8"), filename=filename)

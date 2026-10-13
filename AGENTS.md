@@ -55,7 +55,7 @@ The Reflex app is configured in `rxconfig.py` with `app_name="dashboard"`. Entry
 
 ### Key layers (all under `dashboard/`)
 
-- **Pages** (`pages/`): route handlers. The expenses page is at `expenses/page.py` → `/expenses`.
+- **Pages** (`pages/`): route handlers. The transactions page (module `expenses/`, UI name "Transacciones") is at `expenses/page.py` → `/transactions`.
 - **State** (`expenses/state.py`): `TableState`, the Reflex reactive state for pagination, filtering, sorting, uploads, categorization and database access.
 - **Config** (`config.py`): `Settings` (pydantic-settings) reads environment variables and `.env`: `DATABASE_URL` (default `sqlite:///data/expenses.db`; PostgreSQL in Docker), `OLLAMA_BASE_URL`, `LOG_LEVEL`, `uploaded_files_dir`.
 - **Database** (`database/`): `DatabaseManager` in `operations.py` wraps SQLModel and creates its engine lazily from `settings.database_url`. `models.py` defines the `Expense` table. Schema changes on existing SQLite databases go through the additive guarded migration in `DatabaseManager._migrate_schema` (SQLite only; there is no Alembic).
@@ -87,7 +87,7 @@ A progress strip shows on every page while it runs. Manual rows are never overwr
 
 New columns on `expense` go through `DatabaseManager._ADDED_COLUMNS` (works on SQLite and PostgreSQL).
 `scripts/eval_similarity.py` measures similarity strategies on the owner's own labels (aggregates only).
-Background and references: `docs/categorization-strategy.md`.
+The order and where rules come from are explained in `docs/how-categorization-works.md`; background and references in `docs/categorization-strategy.md`.
 
 ### Overview
 

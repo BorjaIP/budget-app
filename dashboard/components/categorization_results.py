@@ -19,7 +19,7 @@ def categorization_banner() -> rx.Component:
                 spacing="1",
                 width="100%",
             ),
-            rx.link("Ver Gastos", href="/expenses", size="2", underline="always", white_space="nowrap"),
+            rx.link("Ver transacciones", href="/transactions", size="2", underline="always", white_space="nowrap"),
             align="center",
             spacing="3",
             width="100%",
@@ -132,10 +132,10 @@ def results_dialog() -> rx.Component:
             rx.flex(
                 rx.dialog.close(rx.button("Cerrar", variant="soft", color_scheme="gray")),
                 rx.button(
-                    "Ver pendientes en Gastos",
+                    "Ver pendientes en Transacciones",
                     color_scheme="gray",
                     high_contrast=True,
-                    on_click=[TableState.set_show_results(False), TableState.drill_down_review, rx.redirect("/expenses")],
+                    on_click=[TableState.set_show_results(False), TableState.drill_down_review, rx.redirect("/transactions")],
                 ),
                 spacing="3",
                 margin_top="1rem",

@@ -7,7 +7,7 @@ def _row(index: int, concept: str, confidence: float):
     return SimpleNamespace(
         id=index, operation_date="2026-03-01", value_date="2026-03-01", concept=concept, amount=-5.0, balance=0.0,
         category="Otros", subcategory="General", bank_name=None, is_categorized=True, category_source="llm",
-        category_confidence=confidence,
+        category_confidence=confidence, note=None,
     )
 
 

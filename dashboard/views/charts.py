@@ -329,7 +329,7 @@ class StatsState(rx.State):
         period = resolve_period(self.period, self.latest_date or None)
         return [
             TableState.drill_down(category, period.date_from or "", period.date_to or "", "expense"),
-            rx.redirect("/expenses"),
+            rx.redirect("/transactions"),
         ]
 
     @rx.event
@@ -338,14 +338,14 @@ class StatsState(rx.State):
         period = resolve_period(self.period, self.latest_date or None)
         return [
             TableState.drill_down_search(concept, period.date_from or "", period.date_to or ""),
-            rx.redirect("/expenses"),
+            rx.redirect("/transactions"),
         ]
 
     @rx.event
     def review_pending(self):
         return [
             TableState.drill_down_review,
-            rx.redirect("/expenses"),
+            rx.redirect("/transactions"),
         ]
 
 

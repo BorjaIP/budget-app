@@ -23,4 +23,7 @@ class Item(pydantic.BaseModel):
     concept_segments: list[dict] = []
     needs_review: bool = False
     repeat_count: int = 1
+    note: str = ""
+    value_date_human: str = ""
+    source_text: str = ""
     source: Optional[str] = None

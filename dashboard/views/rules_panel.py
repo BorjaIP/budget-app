@@ -9,6 +9,69 @@ from dashboard.rules_state import RuleRow, RulesState
 _NOTE = {"overflow": "hidden", "text_overflow": "ellipsis", "white_space": "nowrap"}
 
 
+_STEPS = [
+    (
+        "Lo que tú categorizas",
+        "Una categoría puesta a mano nunca se cambia, ni siquiera al recategorizar.",
+    ),
+    (
+        "Reglas",
+        "Si el comercio coincide con una regla (la creas tú, o se crea sola al corregir una categoría a mano), se usa "
+        "su categoría. Es instantáneo y siempre da el mismo resultado.",
+    ),
+    (
+        "Parecidos",
+        "Si el concepto es casi idéntico (a partir de un 85 %) a un movimiento que ya etiquetaste y ninguno parecido "
+        "discrepa, se copia su categoría.",
+    ),
+    (
+        "Modelo local",
+        "Si nada de lo anterior encaja, decide el modelo con tus ejemplos más parecidos. Si no está seguro, el "
+        "movimiento queda en «Por revisar».",
+    ),
+]
+
+
+def _how_it_works() -> rx.Component:
+    return card(
+        rx.vstack(
+            *[
+                rx.hstack(
+                    rx.center(
+                        rx.text(str(number), size="1", weight="medium"),
+                        width="1.5rem",
+                        height="1.5rem",
+                        border_radius="50%",
+                        background=rx.color("gray", 4),
+                        flex_shrink="0",
+                    ),
+                    rx.vstack(
+                        rx.text(name, size="2", weight="medium"),
+                        rx.text(text, size="2", color=rx.color("gray", 11)),
+                        spacing="0",
+                        align="start",
+                    ),
+                    spacing="3",
+                    align="start",
+                    width="100%",
+                )
+                for number, (name, text) in enumerate(_STEPS, start=1)
+            ],
+            rx.text(
+                "Esto ocurre al importar un archivo y al pulsar Recategorizar. Además, al corregir una categoría a "
+                "mano, la regla se aplica al momento a los demás movimientos de ese comercio.",
+                size="1",
+                color=rx.color("gray", 11),
+                padding_top="0.25rem",
+            ),
+            spacing="3",
+            width="100%",
+        ),
+        title="Cómo se decide la categoría",
+        subtitle="De más a menos fiable: en cuanto un paso acierta, se queda con su resultado",
+    )
+
+
 def _new_rule_form() -> rx.Component:
     return card(
         rx.vstack(
@@ -154,6 +217,7 @@ def _delete_dialog() -> rx.Component:
 
 def rules_panel() -> rx.Component:
     return rx.vstack(
+        _how_it_works(),
         _new_rule_form(),
         card(
             rx.vstack(

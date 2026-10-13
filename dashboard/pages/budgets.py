@@ -203,7 +203,7 @@ def budgets() -> rx.Component:
             empty_state(
                 "cloud-upload",
                 "Aún no hay datos",
-                "Sube un extracto bancario en la sección Gastos para fijar presupuestos.",
+                "Sube un extracto bancario en la sección Transacciones para fijar presupuestos.",
             ),
         ),
         _recurring_card(),

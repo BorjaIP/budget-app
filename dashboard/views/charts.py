@@ -5,6 +5,7 @@ from datetime import datetime
 import pydantic
 import reflex as rx
 
+from dashboard.anomalies import UnusualRow, find_unusual
 from dashboard.database.operations import db_manager
 from dashboard.expenses.state import TableState
 from dashboard.periods import DEFAULT_PRESET, PRESETS, delta_percent, resolve_period
@@ -46,6 +47,7 @@ class StatsState(rx.State):
     prev_gastos: float | None = None
     uncategorized_count: int = 0
     latest_date: str = ""
+    unusual: list[UnusualRow] = []
     data_range_label: str = ""
     chart_data: list[dict] = []
     category_breakdown: list[dict] = []
@@ -119,6 +121,7 @@ class StatsState(rx.State):
             else:
                 self.prev_ingresos = self.prev_gastos = None
             self.uncategorized_count = db_manager.count_uncategorized()
+            self.unusual = find_unusual(expenses, max_date)
 
             breakdown = db_manager.get_category_breakdown(date_from=date_from, date_to=date_to)
             breakdown_total = sum(row["value"] for row in breakdown) or 1.0
@@ -150,7 +153,7 @@ class StatsState(rx.State):
                     operation_date=_humanize(e.operation_date),
                     concept=e.concept,
                     amount=e.amount,
-                    amount_fmt=_format_currency(e.amount),
+                    amount_fmt=("+" if e.amount > 0 else "") + _format_currency(e.amount),
                     category=e.category or "Sin categorizar",
                     is_expense=e.amount < 0,
                 )
@@ -163,6 +166,7 @@ class StatsState(rx.State):
             self.category_breakdown = []
             self.top_concepts = []
             self.recent_expenses = []
+            self.unusual = []
         finally:
             self.is_loading = False
 

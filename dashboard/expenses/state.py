@@ -35,7 +35,7 @@ def _to_item(expense) -> Item:
         value_date=expense.value_date,
         concept=expense.concept,
         amount=amount,
-        amount_fmt=_format_currency(amount),
+        amount_fmt=("+" if amount > 0 else "") + _format_currency(amount),
         balance=balance,
         balance_fmt=_format_currency(balance),
         is_expense=amount < 0,
@@ -382,6 +382,7 @@ class TableState(rx.State):
                 self.is_categorizing = False
             return
 
+        assigned = 0
         for index, expense in enumerate(pending):
             try:
                 category, subcategory = await categorize_expense(expense.concept)
@@ -395,6 +396,8 @@ class TableState(rx.State):
                 return
 
             db_manager.update_category(expense.id, category, subcategory, source="llm")
+            if category:
+                assigned += 1
 
             async with self:
                 self.categorization_progress = index + 1
@@ -404,6 +407,11 @@ class TableState(rx.State):
         async with self:
             self.is_categorizing = False
             self.load_entries_from_database()
+        left = len(pending) - assigned
+        message = f"Categorizados {assigned} de {len(pending)} movimientos."
+        if left:
+            message += f" {left} quedan sin categorizar; puedes asignarlos a mano."
+        yield rx.toast.success(message)
 
     def force_recategorize(self):
         count = db_manager.reset_categorization()

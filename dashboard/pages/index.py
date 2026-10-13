@@ -16,6 +16,7 @@ from ..views.charts import (
 from ..views.recent_transactions import recent_transactions
 from ..views.stats_cards import budget_stats_cards
 from ..views.top_concepts import top_concepts
+from ..views.unusual_charges import unusual_charges
 
 
 @template(route="/", title="Resumen", on_load=StatsState.load_chart_data)
@@ -73,6 +74,7 @@ def index() -> rx.Component:
                     align_items="start",
                     width="100%",
                 ),
+                unusual_charges(),
                 spacing="6",
                 width="100%",
             ),

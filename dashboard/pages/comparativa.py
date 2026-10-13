@@ -6,6 +6,7 @@ from ..components.card import card
 from ..components.notice import error_notice
 from ..components.page_header import page_header
 from ..templates import template
+from ..views.category_trend import CategoryTrendState, category_trend
 from ..views.yearly_compare import (
     YearlyCompareState,
     yearly_compare_chart,
@@ -13,7 +14,7 @@ from ..views.yearly_compare import (
 )
 
 
-@template(route="/comparativa", title="Comparativa", on_load=YearlyCompareState.load_yearly_summary)
+@template(route="/comparativa", title="Comparativa", on_load=[YearlyCompareState.load_yearly_summary, CategoryTrendState.load_trend])
 def comparativa() -> rx.Component:
     return rx.vstack(
         page_header(
@@ -29,6 +30,7 @@ def comparativa() -> rx.Component:
         ),
         card(yearly_compare_chart(), title="Ingresos vs gastos vs ahorro por año"),
         card(yearly_compare_table(), title="Detalle por año"),
+        card(category_trend(), title="Gasto mensual por categoría"),
         spacing="6",
         width="100%",
     )

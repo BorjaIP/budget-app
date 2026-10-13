@@ -63,6 +63,22 @@ The Reflex app is configured in `rxconfig.py` with `app_name="dashboard"`. Entry
 - **LLM** (`llm/`): `llm_call.py` calls Ollama (default model `qwen2.5:3b-instruct`) at `settings.ollama_base_url` (env `OLLAMA_BASE_URL`, default `http://localhost:11434`). The prompt (`prompt.py`) asks for `[Category][Subcategory]`; few-shot examples come from rows the user tagged by hand (`category_source = "manual"`), falling back to static examples. `CATEGORY_TAXONOMY` is reviewed by the owner: **never change its categories or subcategories**.
 - **UI components** (`components/`), **templates** (`templates/template.py`), **styles** (`styles.py`, Radix UI theme).
 
+### Categorization pipeline
+
+Each movement is categorized in this order (`expenses/state.py::categorize_pending_expenses`):
+
+1. **Merchant memory** (`MerchantLabel`, `llm/merchant.py::merchant_key`): if the user ever corrected this merchant,
+   reuse that label with `category_source="memory"`. No model call, always the same answer. A manual correction is
+   saved with `DatabaseManager.learn_from_correction`, which also applies it to the merchant's non-manual rows.
+2. **Model with retrieved examples** (`llm/retrieval.py`): the 8 labeled merchants most similar to the concept go in
+   the prompt, temperature 0. The answer stores `category_confidence` (joint probability of the two bracketed tags,
+   from Ollama `logprobs`).
+3. **Review queue**: rows without category, or from the model with confidence below `LLM_CONFIDENCE_THRESHOLD`
+   (default 0.6, not calibrated), are listed under "Por revisar".
+
+Manual rows are never overwritten. New columns on `expense` go through `DatabaseManager._ADDED_COLUMNS`
+(works on SQLite and PostgreSQL). Background and references: `docs/categorization-strategy.md`.
+
 ### Logging
 
 The `dashboard` logger writes to stdout (`docker logs budget-app`). At `INFO` a categorization run logs only

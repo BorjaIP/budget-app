@@ -1,11 +1,11 @@
 import reflex as rx
 
 from .. import styles
-from .nav_items import NAV_ITEMS
+from .nav_items import NAV_ITEMS, is_active
 
 
 def _item(href: str, label: str, icon: str) -> rx.Component:
-    active = rx.State.router.page.path == href
+    active = is_active(href)
     return rx.link(
         rx.vstack(
             rx.icon(icon, size=20),

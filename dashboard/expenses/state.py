@@ -6,6 +6,7 @@ from typing import List
 
 import reflex as rx
 
+from dashboard.config import settings as app_settings
 from dashboard.database.operations import db_manager
 from dashboard.expenses.model import Item
 from dashboard.utils.file_processor import file_processor
@@ -64,6 +65,12 @@ def _to_item(expense, search: str = "") -> Item:
         subcategory=expense.subcategory,
         bank_name=expense.bank_name,
         is_categorized=bool(expense.is_categorized),
+        source=expense.category_source,
+        needs_review=(
+            expense.category_source == "llm"
+            and expense.category_confidence is not None
+            and expense.category_confidence < app_settings.llm_confidence_threshold
+        ),
         concept_segments=highlight_segments(expense.concept, search.strip()),
     )
 
@@ -110,6 +117,7 @@ class TableState(rx.State):
     amount_min: str = ""
     amount_max: str = ""
     flow_filter: str = "all"  # all | income | expense
+    review_only: bool = False
 
     @rx.var(cache=True)
     def selected_count(self) -> int:
@@ -146,6 +154,7 @@ class TableState(rx.State):
             or self.amount_min
             or self.amount_max
             or self.flow_filter != "all"
+            or self.review_only
         )
 
     @rx.var(cache=True)
@@ -212,6 +221,7 @@ class TableState(rx.State):
                 amount_min=self._safe_float(self.amount_min),
                 amount_max=self._safe_float(self.amount_max),
                 flow=self.flow_filter,
+                review_only=self.review_only,
                 sort=self.sort_value,
                 sort_dir="desc" if self.sort_reverse else "asc",
             )
@@ -324,7 +334,15 @@ class TableState(rx.State):
         self.amount_min = ""
         self.amount_max = ""
         self.flow_filter = flow
+        self.review_only = False
         self.offset = 0
+        return TableState.load_entries_from_database
+
+    def drill_down_review(self):
+        """Arrive from the overview with only the movements that need a human look."""
+        self.drill_down("", "", "", "all")
+        self.selected_categories = []
+        self.review_only = True
         return TableState.load_entries_from_database
 
     def drill_down_search(self, text: str, date_from: str, date_to: str):
@@ -366,19 +384,27 @@ class TableState(rx.State):
         """Tag every selected movement by hand; manual tags feed the few-shot prompt."""
         if not self.selected_ids or not category:
             return
-        done = sum(db_manager.update_category(i, category, None, source="manual") for i in self.selected_ids)
+        done, applied = 0, 0
+        for expense_id in self.selected_ids:
+            if db_manager.update_category(expense_id, category, None, source="manual"):
+                done += 1
+                applied += db_manager.learn_from_correction(expense_id)
         self.selected_ids = []
         self.load_entries_from_database()
-        return rx.toast.success(f"{done} movimientos asignados a {category}")
+        message = f"{done} movimientos asignados a {category}"
+        if applied:
+            message += f" y {applied} más del mismo comercio"
+        return rx.toast.success(message)
 
     def update_expense_category(self, expense_id: int, category: str, subcategory: str = ""):
         ok = db_manager.update_category(expense_id, category, subcategory or None, source="manual")
         if not ok:
             return rx.toast.error("No se pudo actualizar la categoría")
-        return [
-            TableState.load_entries_from_database,
-            rx.toast.success(f"Categoría actualizada a {category}"),
-        ]
+        applied = db_manager.learn_from_correction(expense_id)
+        message = f"Categoría actualizada a {category}"
+        if applied:
+            message += f" y aplicada a {applied} movimientos del mismo comercio"
+        return [TableState.load_entries_from_database, rx.toast.success(message)]
 
     def delete_expense(self, expense_id: int):
         ok = db_manager.delete_expense(expense_id)
@@ -477,7 +503,8 @@ class TableState(rx.State):
 
     @rx.event(background=True)
     async def categorize_pending_expenses(self):
-        from dashboard.llm.llm_call import categorize_expense
+        from dashboard.llm.llm_call import categorize_with_confidence
+        from dashboard.llm.merchant import merchant_key
         from dashboard.llm.run_stats import RunStats
 
         stats = RunStats()
@@ -487,7 +514,8 @@ class TableState(rx.State):
             self.categorization_progress = 0
             pending = db_manager.get_uncategorized_expenses(limit=500)
             self.categorization_total = len(pending)
-        logger.info("categorization run started: %d movements pending", len(pending))
+        learned = db_manager.sync_merchant_memory()
+        logger.info("categorization run started: %d movements pending (%d labels backfilled)", len(pending), learned)
 
         if not pending:
             async with self:
@@ -497,8 +525,18 @@ class TableState(rx.State):
         assigned = 0
         for index, expense in enumerate(pending):
             started = time.perf_counter()
+            remembered = db_manager.get_merchant_label(merchant_key(expense.concept))
+            if remembered:  # the user already taught the app this merchant: no model call, same answer every time
+                stats.record_memory()
+                db_manager.update_category(
+                    expense.id, remembered["category"], remembered["subcategory"], source="memory"
+                )
+                assigned += 1
+                async with self:
+                    self.categorization_progress = index + 1
+                continue
             try:
-                category, subcategory = await categorize_expense(expense.concept)
+                category, subcategory, confidence = await categorize_with_confidence(expense.concept)
             except Exception:
                 stats.record_error()
                 logger.exception("The local model is not available")
@@ -510,8 +548,10 @@ class TableState(rx.State):
                 )
                 return
 
-            stats.record(category, subcategory, (time.perf_counter() - started) * 1000)
-            db_manager.update_category(expense.id, category, subcategory, source="llm")
+            stats.record(category, subcategory, (time.perf_counter() - started) * 1000, confidence)
+            db_manager.update_category(
+                expense.id, category, subcategory, source="llm", confidence=confidence if confidence is not None else 0.0
+            )
             if category:
                 assigned += 1
 

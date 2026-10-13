@@ -330,6 +330,13 @@ def _flow_filter() -> rx.Component:
     )
 
 
+def _review_chip() -> rx.Component:
+    return rx.cond(
+        TableState.review_only,
+        rx.badge("Por revisar", color_scheme="violet", variant="soft", size="2"),
+    )
+
+
 def _summary_line() -> rx.Component:
     return rx.text(
         "Mostrando ",
@@ -423,6 +430,7 @@ def _filters() -> rx.Component:
         ),
         rx.flex(
             _flow_filter(),
+            _review_chip(),
             rx.spacer(),
             _summary_line(),
             spacing="3",

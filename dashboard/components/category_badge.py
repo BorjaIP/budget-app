@@ -50,12 +50,18 @@ def category_badge(item: Item) -> rx.Component:
         spinner,
         label,
         color_scheme=color,
-        variant="soft",
+        variant=rx.cond(item.needs_review, "outline", "soft"),
         size="1",
         radius="medium",
         cursor="pointer",
         style={"_hover": {"opacity": 0.85}},
-        custom_attrs={"title": "Cambiar categoría"},
+        custom_attrs={
+            "title": rx.cond(
+                item.needs_review,
+                "El modelo no está seguro: revísala o cámbiala",
+                rx.cond(item.source == "memory", "Categoría aprendida de tus correcciones", "Cambiar categoría"),
+            )
+        },
     )
 
     return rx.popover.root(

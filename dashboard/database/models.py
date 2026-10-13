@@ -15,7 +15,10 @@ class ExpenseBase(SQLModel):
     subcategory: Optional[str] = Field(default=None)
     bank_name: Optional[str] = Field(default=None, index=True)
     is_categorized: bool = Field(default=False, index=True)
-    category_source: Optional[str] = Field(default=None)
+    category_source: Optional[str] = Field(default=None)  # manual | memory | llm
+    category_confidence: Optional[float] = Field(
+        default=None, description="Model confidence in 0..1; set only for llm-assigned categories"
+    )
 
 
 class Expense(ExpenseBase, table=True):
@@ -42,3 +45,14 @@ class CategoryBudget(SQLModel, table=True):
 
     category: str = Field(primary_key=True)
     monthly_limit: float = Field(description="Monthly limit in euros; always positive")
+
+
+class MerchantLabel(SQLModel, table=True):
+    """What the user taught the app: one category per merchant key (see llm/merchant.py)."""
+
+    merchant_key: str = Field(primary_key=True)
+    category: str
+    subcategory: Optional[str] = None
+    sample_concept: str = Field(description="One real concept of this merchant, used as a prompt example")
+    confirmations: int = Field(default=1, description="Times the user confirmed this label")
+    updated_at: NaiveDatetime = Field(default_factory=datetime.now)

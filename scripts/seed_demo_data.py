@@ -86,6 +86,7 @@ def _row(rng: random.Random, day: date, concept: str, amount: float, category: s
         bank_name=rng.choice(BANKS),
         is_categorized=categorized,
         category_source=source,
+        category_confidence=round(rng.uniform(0.25, 0.99), 2) if source == "llm" else None,
         dedupe_hash="",
     )
 

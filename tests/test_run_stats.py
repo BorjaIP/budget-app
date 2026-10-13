@@ -10,7 +10,7 @@ def test_summary_counts_fallbacks_errors_and_categories():
 
     summary = stats.summary()
 
-    assert "3 categorized" in summary
+    assert "3 by the model" in summary
     assert "1 fell back to Otros/General" in summary
     assert "1 errors" in summary
     assert "avg 300 ms/call" in summary
@@ -18,5 +18,5 @@ def test_summary_counts_fallbacks_errors_and_categories():
 
 
 def test_summary_of_an_empty_run_does_not_divide_by_zero():
-    assert "0 categorized" in RunStats().summary()
+    assert "0 by the model" in RunStats().summary()
     assert "top categories: none" in RunStats().summary()

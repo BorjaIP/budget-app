@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     # Ollama LLM
     # ------------------------------------------------------------------
     ollama_base_url: str = "http://localhost:11434"
+    # Model answers below this joint probability are flagged "por revisar". Not calibrated:
+    # check the share of flagged rows that were wrong and adjust.
+    llm_confidence_threshold: float = 0.6
 
     # ------------------------------------------------------------------
     # Reflex / runtime

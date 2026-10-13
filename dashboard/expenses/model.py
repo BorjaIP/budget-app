@@ -21,3 +21,5 @@ class Item(pydantic.BaseModel):
     bank_name: Optional[str] = None
     is_categorized: bool = False
     concept_segments: list[dict] = []
+    needs_review: bool = False
+    source: Optional[str] = None

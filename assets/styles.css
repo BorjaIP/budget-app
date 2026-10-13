@@ -75,3 +75,19 @@ body {
 .rt-BaseTabList {
     box-shadow: none;
 }
+
+/* Rows that behave as links (category list on the overview). */
+.row-link {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--radius-2);
+}
+.row-link:hover { background: var(--gray-a3); }
+.row-link:focus-visible { outline: 2px solid var(--gray-a8); outline-offset: 2px; }

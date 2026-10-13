@@ -3,7 +3,7 @@ import reflex as rx
 from ..views.charts import StatsState
 
 
-def _stat(label: str, value_var, color=None) -> rx.Component:
+def _stat(label: str, value_var, color=None, delta_var=None) -> rx.Component:
     return rx.vstack(
         rx.text(label, size="2", color=rx.color("gray", 11)),
         rx.skeleton(
@@ -19,6 +19,12 @@ def _stat(label: str, value_var, color=None) -> rx.Component:
             loading=StatsState.is_loading,
             min_width="6em",
         ),
+        rx.cond(
+            delta_var != "",
+            rx.text(delta_var, size="1", color=rx.color("gray", 11), class_name="num"),
+        )
+        if delta_var is not None
+        else rx.fragment(),
         spacing="1",
         align="start",
         width="100%",
@@ -30,8 +36,8 @@ def _stat(label: str, value_var, color=None) -> rx.Component:
 def budget_stats_cards() -> rx.Component:
     """One bordered strip; the 1px gaps show the container color as dividers."""
     return rx.grid(
-        _stat("Ingresos", StatsState.total_ingresos_fmt, rx.color("green", 11)),
-        _stat("Gastos", StatsState.total_gastos_fmt, rx.color("red", 11)),
+        _stat("Ingresos", StatsState.total_ingresos_fmt, rx.color("green", 11), StatsState.ingresos_delta),
+        _stat("Gastos", StatsState.total_gastos_fmt, rx.color("red", 11), StatsState.gastos_delta),
         _stat("Saldo", StatsState.saldo_neto_fmt),
         _stat("Tasa de ahorro", StatsState.savings_rate_fmt),
         gap="1px",

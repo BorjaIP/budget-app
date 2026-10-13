@@ -365,6 +365,27 @@ class DatabaseManager:
             )
         return result
 
+    def get_flow_totals(
+        self, date_from: str | None = None, date_to: str | None = None
+    ) -> dict[str, float]:
+        """Total income and spending (positive numbers) within an optional date range."""
+        with self.get_session() as session:
+            statement = select(Expense.amount)
+            if date_from:
+                statement = statement.where(Expense.operation_date >= date_from)
+            if date_to:
+                statement = statement.where(Expense.operation_date <= date_to)
+            amounts = session.exec(statement).all()
+        return {
+            "ingresos": round(sum(a for a in amounts if a > 0), 2),
+            "gastos": round(sum(-a for a in amounts if a < 0), 2),
+        }
+
+    def count_uncategorized(self) -> int:
+        with self.get_session() as session:
+            statement = select(func.count()).select_from(Expense).where(Expense.category.is_(None))  # type: ignore[union-attr]
+            return int(session.exec(statement).one())
+
     def get_recent_expenses(self, limit: int = 8) -> list[Expense]:
         with self.get_session() as session:
             statement = (

@@ -272,6 +272,19 @@ class TableState(rx.State):
         self.offset = 0
         return TableState.load_entries_from_database
 
+    def drill_down(self, category: str, date_from: str, date_to: str, flow: str):
+        """Arrive from the overview with a category and period already applied."""
+        self.search_value = ""
+        self.selected_categories = [category]
+        self.selected_banks = []
+        self.date_from = date_from
+        self.date_to = date_to
+        self.amount_min = ""
+        self.amount_max = ""
+        self.flow_filter = flow
+        self.offset = 0
+        return TableState.load_entries_from_database
+
     def clear_filters(self):
         self.search_value = ""
         self.selected_categories = []

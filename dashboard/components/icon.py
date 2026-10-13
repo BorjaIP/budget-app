@@ -24,6 +24,7 @@ _TAGS = {
     "chevrons-right": "DoubleArrowRightIcon",
     "sun": "SunIcon",
     "moon": "MoonIcon",
+    "info-circled": "InfoCircledIcon",
 }
 
 

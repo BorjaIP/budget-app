@@ -2,6 +2,7 @@ import reflex as rx
 
 from ..components.card import card
 from ..components.empty_state import empty_state
+from ..components.icon import icon
 from ..components.notice import error_notice
 from ..components.page_header import page_header
 from ..templates import template
@@ -25,6 +26,31 @@ def index() -> rx.Component:
         rx.cond(
             StatsState.load_error,
             error_notice("No se pudieron cargar los datos.", StatsState.load_chart_data),
+        ),
+        rx.cond(
+            StatsState.uncategorized_count > 0,
+            rx.flex(
+                rx.hstack(
+                    icon("info-circled", size=16),
+                    rx.text(StatsState.uncategorized_label, size="2"),
+                    spacing="2",
+                    align="center",
+                ),
+                rx.button(
+                    "Revisar",
+                    variant="soft",
+                    color_scheme="gray",
+                    size="2",
+                    on_click=StatsState.review_uncategorized,
+                ),
+                justify="between",
+                align="center",
+                gap="1rem",
+                width="100%",
+                padding="0.75rem 1rem",
+                border=f"1px solid {rx.color('gray', 5, True)}",
+                border_radius="var(--radius-4)",
+            ),
         ),
         budget_stats_cards(),
         rx.cond(

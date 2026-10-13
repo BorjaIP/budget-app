@@ -6,19 +6,15 @@ import pydantic
 import reflex as rx
 
 from dashboard.database.operations import db_manager
+from dashboard.expenses.state import TableState
+from dashboard.periods import DEFAULT_PRESET, PRESETS, delta_percent, resolve_period
 
 logger = logging.getLogger(__name__)
 
-_MONTH_NAMES_ES = [
-    "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
-    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
-]
-_MONTH_NUMBER = {name: f"{i + 1:02d}" for i, name in enumerate(_MONTH_NAMES_ES)}
 _MONTH_ABBR_ES = {
     "01": "ene", "02": "feb", "03": "mar", "04": "abr", "05": "may", "06": "jun",
     "07": "jul", "08": "ago", "09": "sep", "10": "oct", "11": "nov", "12": "dic",
 }
-_DAYS_IN_MONTH = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
 
 
 class ConceptRow(pydantic.BaseModel):
@@ -45,8 +41,11 @@ def _format_currency(value: float) -> str:
 
 class StatsState(rx.State):
     available_years: list[str] = []
-    selected_year: str = "Todo"
-    selected_month: str = "Todo"
+    period: str = DEFAULT_PRESET
+    prev_ingresos: float | None = None
+    prev_gastos: float | None = None
+    uncategorized_count: int = 0
+    latest_date: str = ""
     data_range_label: str = ""
     chart_data: list[dict] = []
     category_breakdown: list[dict] = []
@@ -56,22 +55,12 @@ class StatsState(rx.State):
     load_error: bool = False
 
     @rx.var(cache=True)
-    def year_options(self) -> list[str]:
-        return ["Todo", *self.available_years]
+    def preset_value(self) -> str:
+        return self.period if self.period in PRESETS else ""
 
     @rx.var(cache=True)
-    def month_options(self) -> list[str]:
-        return ["Todo", *_MONTH_NAMES_ES]
-
-    def _date_range(self) -> tuple[str | None, str | None]:
-        if self.selected_year == "Todo":
-            return None, None
-        year = int(self.selected_year)
-        if self.selected_month == "Todo":
-            return f"{year}-01-01", f"{year}-12-31"
-        month_num = _MONTH_NUMBER[self.selected_month]
-        last_day = _DAYS_IN_MONTH[int(month_num) - 1]
-        return f"{year}-{month_num}-01", f"{year}-{month_num}-{last_day:02d}"
+    def year_value(self) -> str:
+        return self.period if self.period.isdigit() else ""
 
     @rx.event
     async def load_chart_data(self):
@@ -81,13 +70,15 @@ class StatsState(rx.State):
             self.available_years = db_manager.get_available_years()
             min_date, max_date = db_manager.get_date_bounds()
             self.data_range_label = _format_range_label(min_date, max_date)
+            self.latest_date = max_date or ""
 
-            date_from, date_to = self._date_range()
+            period = resolve_period(self.period, max_date)
+            date_from, date_to = period.date_from, period.date_to
             expenses = db_manager.get_all_expenses()
 
             # Daily buckets when a single month is selected, monthly otherwise
             # (a full year of daily points overlaps and becomes unreadable).
-            monthly = self.selected_month == "Todo"
+            monthly = not period.daily
 
             ingresos: dict[str, float] = defaultdict(float)
             gastos: dict[str, float] = defaultdict(float)
@@ -120,6 +111,14 @@ class StatsState(rx.State):
                 }
                 for b in all_buckets
             ]
+
+            if period.prev_from:
+                previous = db_manager.get_flow_totals(period.prev_from, period.prev_to)
+                self.prev_ingresos = previous["ingresos"]
+                self.prev_gastos = previous["gastos"]
+            else:
+                self.prev_ingresos = self.prev_gastos = None
+            self.uncategorized_count = db_manager.count_uncategorized()
 
             breakdown = db_manager.get_category_breakdown(date_from=date_from, date_to=date_to)
             breakdown_total = sum(row["value"] for row in breakdown) or 1.0
@@ -196,17 +195,50 @@ class StatsState(rx.State):
         rate = (self.total_ingresos - self.total_gastos) / self.total_ingresos * 100
         return f"{rate:.1f} %".replace(".", ",")
 
+    @rx.var(cache=True)
+    def ingresos_delta(self) -> str:
+        return _delta_label(self.total_ingresos, self.prev_ingresos)
+
+    @rx.var(cache=True)
+    def gastos_delta(self) -> str:
+        return _delta_label(self.total_gastos, self.prev_gastos)
+
+    @rx.var(cache=True)
+    def uncategorized_label(self) -> str:
+        n = self.uncategorized_count
+        return f"{n} movimiento sin categorizar" if n == 1 else f"{n} movimientos sin categorizar"
+
     @rx.event
-    async def set_selected_year(self, value: str | list[str]):
-        self.selected_year = value if isinstance(value, str) else (value[0] if value else "Todo")
-        if self.selected_year == "Todo":
-            self.selected_month = "Todo"
+    async def set_period(self, value: str | list[str]):
+        chosen = value if isinstance(value, str) else (value[0] if value else "")
+        if not chosen:
+            return
+        self.period = chosen
         await self.load_chart_data()
 
     @rx.event
-    async def set_selected_month(self, value: str | list[str]):
-        self.selected_month = value if isinstance(value, str) else (value[0] if value else "Todo")
-        await self.load_chart_data()
+    def open_category(self, category: str):
+        """Jump to Gastos filtered by this category and the current period."""
+        period = resolve_period(self.period, self.latest_date or None)
+        return [
+            TableState.drill_down(category, period.date_from or "", period.date_to or "", "expense"),
+            rx.redirect("/expenses"),
+        ]
+
+    @rx.event
+    def review_uncategorized(self):
+        return [
+            TableState.drill_down("Sin categorizar", "", "", "all"),
+            rx.redirect("/expenses"),
+        ]
+
+
+def _delta_label(current: float, previous: float | None) -> str:
+    change = None if previous is None else delta_percent(current, previous)
+    if change is None:
+        return ""
+    sign = "+" if change > 0 else "−" if change < 0 else ""
+    return f"{sign}{abs(change):.1f} % vs periodo anterior".replace(".", ",")
 
 
 def _humanize(iso_date: str) -> str:
@@ -293,41 +325,26 @@ def _loading_placeholder() -> rx.Component:
     return rx.skeleton(height=f"{_CHART_HEIGHT}px", width="100%")
 
 
-def _labeled(label: str, control: rx.Component) -> rx.Component:
-    return rx.vstack(
-        rx.text(label, size="1", color=rx.color("gray", 11)),
-        control,
-        spacing="1",
-        align="start",
-    )
-
-
 def date_filter_controls() -> rx.Component:
     return rx.vstack(
         rx.hstack(
-            _labeled(
-                "Año",
-                rx.select(
-                    StatsState.year_options,
-                    value=StatsState.selected_year,
-                    on_change=StatsState.set_selected_year,
-                    size="2",
-                ),
+            rx.segmented_control.root(
+                *[rx.segmented_control.item(label, value=key) for key, label in PRESETS.items()],
+                value=StatsState.preset_value,
+                on_change=StatsState.set_period,
+                size="2",
+                custom_attrs={"aria-label": "Periodo"},
             ),
-            rx.cond(
-                StatsState.selected_year != "Todo",
-                _labeled(
-                    "Mes",
-                    rx.select(
-                        StatsState.month_options,
-                        value=StatsState.selected_month,
-                        on_change=StatsState.set_selected_month,
-                        size="2",
-                    ),
-                ),
+            rx.select(
+                StatsState.available_years,
+                placeholder="Otro año",
+                value=StatsState.year_value,
+                on_change=StatsState.set_period,
+                size="2",
+                custom_attrs={"aria-label": "Año concreto"},
             ),
             spacing="3",
-            align="end",
+            align="center",
             wrap="wrap",
         ),
         rx.text(StatsState.data_range_label, size="1", color=rx.color("gray", 11)),

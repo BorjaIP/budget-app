@@ -8,7 +8,7 @@ _TRUNCATE = {"overflow": "hidden", "text_overflow": "ellipsis", "white_space": "
 
 
 def _row(item) -> rx.Component:
-    return rx.vstack(
+    content = rx.vstack(
         rx.hstack(
             rx.text(item["name"], size="2", flex="1", min_width="0", style=_TRUNCATE),
             rx.text(
@@ -47,6 +47,13 @@ def _row(item) -> rx.Component:
         spacing="2",
         width="100%",
         padding_y="0.5em",
+    )
+    return rx.el.button(
+        content,
+        type="button",
+        on_click=StatsState.open_category(item["name"]),
+        title="Ver estos gastos",
+        class_name="row-link",
     )
 
 

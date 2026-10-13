@@ -63,6 +63,13 @@ class TableState(rx.State):
     is_uploading: bool = False
     show_upload_modal: bool = False
     pending_bank_name: str = ""
+    preview_ready: bool = False
+    preview_path: str = ""
+    preview_new: int = 0
+    preview_duplicates: int = 0
+    preview_range: str = ""
+    preview_income_fmt: str = ""
+    preview_spending_fmt: str = ""
 
     is_loading: bool = False
     is_categorizing: bool = False
@@ -315,57 +322,91 @@ class TableState(rx.State):
             rx.toast.success("Movimiento borrado"),
         ]
 
-    async def handle_upload(self, files: list[rx.UploadFile]):
+    async def handle_preview(self, files: list[rx.UploadFile]):
+        """Parse the chosen file and show what an import would do, without storing anything."""
+        self._reset_preview()
         if not files:
             self.upload_status = "Sin archivo seleccionado"
             self.upload_error = True
             return
+        file = files[0]
+        if not file.filename or not file.filename.lower().endswith((".xls", ".xlsx")):
+            self.upload_status = "Sólo se aceptan archivos .xls o .xlsx"
+            self.upload_error = True
+            return
         self.is_uploading = True
         self.upload_error = False
-        self.upload_status = "Procesando archivo..."
+        self.upload_status = ""
         try:
-            for file in files:
-                if not file.filename:
-                    self.upload_status = "Archivo inválido"
-                    self.upload_error = True
-                    continue
-                if not file.filename.lower().endswith((".xls", ".xlsx")):
-                    self.upload_status = "Sólo se aceptan archivos .xls o .xlsx"
-                    self.upload_error = True
-                    continue
-
-                upload_data = await file.read()
-                outfile = rx.get_upload_dir() / Path(file.filename).name
-                outfile.parent.mkdir(parents=True, exist_ok=True)
-                outfile.write_bytes(upload_data)
-
-                bank = self.pending_bank_name.strip() or None
-                result = file_processor.process_excel_file(str(outfile), bank_name=bank)
-
-                if result["status"] == "success":
-                    self.upload_status = result["message"]
-                    self.upload_error = False
-                    self.show_upload_modal = False
-                    self.pending_bank_name = ""
-                    self.offset = 0
-                    self.load_entries_from_database()
-                    try:
-                        outfile.unlink()
-                    except OSError:
-                        pass
-                    yield rx.toast.success(result["message"])
-                    yield TableState.categorize_pending_expenses
-                else:
-                    self.upload_status = result["message"]
-                    self.upload_error = True
-                    yield rx.toast.error(result["message"])
+            outfile = rx.get_upload_dir() / Path(file.filename).name
+            outfile.parent.mkdir(parents=True, exist_ok=True)
+            outfile.write_bytes(await file.read())
+            preview = file_processor.preview_excel_file(
+                str(outfile), bank_name=self.pending_bank_name.strip() or None
+            )
+            if preview["status"] != "success":
+                outfile.unlink(missing_ok=True)
+                self.upload_status = preview["message"]
+                self.upload_error = True
+                return
+            self.preview_path = str(outfile)
+            self.preview_new = preview["new"]
+            self.preview_duplicates = preview["duplicates"]
+            self.preview_range = (
+                f"{_humanize_date(preview['date_from'])} a {_humanize_date(preview['date_to'])}"
+            )
+            self.preview_income_fmt = _format_currency(preview["income"])
+            self.preview_spending_fmt = _format_currency(preview["spending"])
+            self.preview_ready = True
         except Exception:
-            logger.exception("Could not process the uploaded file")
-            self.upload_status = "No se pudo procesar el archivo. Comprueba que sea un extracto válido."
+            logger.exception("Could not read the uploaded file")
+            self.upload_status = "No se pudo leer el archivo. Comprueba que sea un extracto válido."
             self.upload_error = True
-            yield rx.toast.error("No se pudo procesar el archivo")
         finally:
             self.is_uploading = False
+
+    def _reset_preview(self):
+        if self.preview_path:
+            Path(self.preview_path).unlink(missing_ok=True)
+        self.preview_ready = False
+        self.preview_path = ""
+        self.preview_new = 0
+        self.preview_duplicates = 0
+        self.preview_range = ""
+        self.preview_income_fmt = ""
+        self.preview_spending_fmt = ""
+
+    def discard_preview(self):
+        self._reset_preview()
+        self.upload_status = ""
+        self.upload_error = False
+        return rx.clear_selected_files("upload-excel")
+
+    def confirm_import(self):
+        """Store the previewed file (duplicates are skipped) and categorize the new rows."""
+        if not self.preview_path:
+            return
+        self.is_uploading = True
+        try:
+            result = file_processor.process_excel_file(
+                self.preview_path, bank_name=self.pending_bank_name.strip() or None
+            )
+        except Exception:
+            logger.exception("Could not import the file")
+            self.is_uploading = False
+            return rx.toast.error("No se pudo importar el archivo")
+        self.is_uploading = False
+        if result["status"] != "success":
+            self.upload_status = result["message"]
+            self.upload_error = True
+            return rx.toast.error(result["message"])
+        self._reset_preview()
+        self.show_upload_modal = False
+        self.pending_bank_name = ""
+        self.offset = 0
+        self.upload_status = ""
+        self.load_entries_from_database()
+        return [rx.toast.success(result["message"]), TableState.categorize_pending_expenses]
 
     @rx.event(background=True)
     async def categorize_pending_expenses(self):
@@ -423,6 +464,7 @@ class TableState(rx.State):
         ]
 
     def open_upload_modal(self):
+        self._reset_preview()
         self.upload_status = ""
         self.upload_error = False
         self.pending_bank_name = ""
@@ -435,9 +477,15 @@ class TableState(rx.State):
     @rx.event
     def set_show_upload_modal(self, value: bool):
         self.show_upload_modal = value
+        if not value:
+            self._reset_preview()
 
     def set_pending_bank_name(self, value: str):
         self.pending_bank_name = value
+        if self.preview_ready:
+            # The bank name is part of the duplicate check, so the preview no longer applies.
+            self._reset_preview()
+            return rx.clear_selected_files("upload-excel")
 
     def export_csv(self):
         import csv

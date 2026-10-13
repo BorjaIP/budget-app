@@ -519,6 +519,32 @@ def _pagination() -> rx.Component:
     )
 
 
+def _preview_line(label: str, value) -> rx.Component:
+    return rx.hstack(
+        rx.text(label, size="2", color=rx.color("gray", 11)),
+        rx.spacer(),
+        rx.text(value, size="2", weight="medium", class_name="num"),
+        width="100%",
+    )
+
+
+def _import_preview() -> rx.Component:
+    """What importing the chosen file would do; nothing is stored until it is confirmed."""
+    return rx.vstack(
+        _preview_line("Movimientos nuevos", TableState.preview_new),
+        _preview_line("Duplicados que se ignorarán", TableState.preview_duplicates),
+        _preview_line("Periodo del archivo", TableState.preview_range),
+        _preview_line("Ingresos", TableState.preview_income_fmt),
+        _preview_line("Gastos", TableState.preview_spending_fmt),
+        spacing="2",
+        width="100%",
+        padding="0.75rem 1rem",
+        border=f"1px solid {rx.color('gray', 5, True)}",
+        border_radius="var(--radius-3)",
+        custom_attrs={"role": "status"},
+    )
+
+
 def _upload_modal() -> rx.Component:
     return rx.dialog.root(
         rx.dialog.content(
@@ -579,19 +605,42 @@ def _upload_modal() -> rx.Component:
                     ),
                     rx.fragment(),
                 ),
+                rx.cond(TableState.preview_ready, _import_preview(), rx.fragment()),
                 rx.text(TableState.upload_stats, size="1", color=rx.color("gray", 11)),
                 spacing="3",
                 width="100%",
             ),
             rx.flex(
                 rx.dialog.close(rx.button("Cerrar", variant="soft", color_scheme="gray")),
-                rx.button(
-                    rx.cond(TableState.is_uploading, rx.spinner(size="1"), rx.fragment()),
-                    "Procesar",
-                    color_scheme="gray",
-                    high_contrast=True,
-                    on_click=TableState.handle_upload(rx.upload_files(upload_id="upload-excel")),
-                    disabled=TableState.is_uploading,
+                rx.cond(
+                    TableState.preview_ready,
+                    rx.hstack(
+                        rx.button(
+                            "Elegir otro",
+                            variant="soft",
+                            color_scheme="gray",
+                            on_click=TableState.discard_preview,
+                        ),
+                        rx.button(
+                            rx.cond(TableState.is_uploading, rx.spinner(size="1"), rx.fragment()),
+                            "Importar ",
+                            TableState.preview_new,
+                            " movimientos",
+                            color_scheme="gray",
+                            high_contrast=True,
+                            on_click=TableState.confirm_import,
+                            disabled=TableState.is_uploading | (TableState.preview_new == 0),
+                        ),
+                        spacing="3",
+                    ),
+                    rx.button(
+                        rx.cond(TableState.is_uploading, rx.spinner(size="1"), rx.fragment()),
+                        "Vista previa",
+                        color_scheme="gray",
+                        high_contrast=True,
+                        on_click=TableState.handle_preview(rx.upload_files(upload_id="upload-excel")),
+                        disabled=TableState.is_uploading,
+                    ),
                 ),
                 spacing="3",
                 margin_top="16px",

@@ -381,6 +381,18 @@ class DatabaseManager:
             "gastos": round(sum(-a for a in amounts if a < 0), 2),
         }
 
+    def count_existing_hashes(self, hashes: list[str]) -> int:
+        """How many of these dedupe hashes are already stored."""
+        if not hashes:
+            return 0
+        with self.get_session() as session:
+            statement = (
+                select(func.count())
+                .select_from(Expense)
+                .where(Expense.dedupe_hash.in_(hashes))  # type: ignore[attr-defined]
+            )
+            return int(session.exec(statement).one())
+
     def get_budgets(self) -> dict[str, float]:
         with self.get_session() as session:
             return {b.category: b.monthly_limit for b in session.exec(select(CategoryBudget)).all()}

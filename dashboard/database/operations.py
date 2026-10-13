@@ -238,6 +238,34 @@ class DatabaseManager:
             session.commit()
             return len(rows)
 
+    def snapshot_categorization(self) -> list[tuple]:
+        """Current categorization of every row `reset_categorization` may overwrite."""
+        with self.get_session() as session:
+            statement = select(Expense).where(
+                or_(Expense.category_source.is_(None), Expense.category_source != "manual")  # type: ignore[union-attr]
+            )
+            return [
+                (r.id, r.category, r.subcategory, r.is_categorized, r.category_source)
+                for r in session.exec(statement).all()
+            ]
+
+    def restore_categorization(self, snapshot: list[tuple]) -> int:
+        """Put the categorization captured by `snapshot_categorization` back."""
+        restored = 0
+        with self.get_session() as session:
+            for expense_id, category, subcategory, categorized, source in snapshot:
+                row = session.get(Expense, expense_id)
+                if row is None:
+                    continue
+                row.category = category
+                row.subcategory = subcategory
+                row.is_categorized = categorized
+                row.category_source = source
+                session.add(row)
+                restored += 1
+            session.commit()
+        return restored
+
     def delete_expense(self, expense_id: int) -> bool:
         with self.get_session() as session:
             expense = session.get(Expense, expense_id)

@@ -11,6 +11,10 @@ from dashboard.utils.file_processor import file_processor
 
 logger = logging.getLogger(__name__)
 
+# Categorization before the last "Recategorizar", per browser session. Kept out of the
+# reactive state because it can hold thousands of rows that must not travel to the client.
+_UNDO_SNAPSHOTS: dict[str, list[tuple]] = {}
+
 
 def _format_currency(value: float) -> str:
     formatted = f"{abs(value):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
@@ -75,6 +79,7 @@ class TableState(rx.State):
     is_categorizing: bool = False
     categorization_progress: int = 0
     categorization_total: int = 0
+    can_undo_recategorize: bool = False
 
     selected_categories: list[str] = []
     selected_banks: list[str] = []
@@ -448,13 +453,26 @@ class TableState(rx.State):
         async with self:
             self.is_categorizing = False
             self.load_entries_from_database()
+        async with self:
+            self.can_undo_recategorize = self.router.session.client_token in _UNDO_SNAPSHOTS
         left = len(pending) - assigned
         message = f"Categorizados {assigned} de {len(pending)} movimientos."
         if left:
             message += f" {left} quedan sin categorizar; puedes asignarlos a mano."
         yield rx.toast.success(message)
 
+    def undo_recategorize(self):
+        snapshot = _UNDO_SNAPSHOTS.pop(self.router.session.client_token, None)
+        self.can_undo_recategorize = False
+        if not snapshot:
+            return rx.toast.info("No hay nada que deshacer")
+        restored = db_manager.restore_categorization(snapshot)
+        self.load_entries_from_database()
+        return rx.toast.success(f"Categorías anteriores restauradas en {restored} movimientos")
+
     def force_recategorize(self):
+        _UNDO_SNAPSHOTS[self.router.session.client_token] = db_manager.snapshot_categorization()
+        self.can_undo_recategorize = False
         count = db_manager.reset_categorization()
         if count == 0:
             return rx.toast.info("No hay movimientos para recategorizar")

@@ -1,4 +1,6 @@
+import logging
 import re
+import time
 from typing import Any
 
 import httpx
@@ -6,6 +8,8 @@ import httpx
 from dashboard.config import settings
 
 from .prompt import PROMPT, STATIC_EXAMPLES
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "qwen2.5:3b-instruct"
 
@@ -187,5 +191,12 @@ async def query_llm(
 async def categorize_expense(concept: str, model: str = DEFAULT_MODEL) -> tuple[str, str]:
     examples = _get_dynamic_examples()
     formatted_prompt = PROMPT.format(examples=examples, variable=concept)
+    started = time.perf_counter()
     raw = await query_llm(formatted_prompt, model=model)
-    return parse_category_response(raw)
+    result = parse_category_response(raw)
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    # Concepts and model answers come from bank data: only logged at DEBUG.
+    logger.debug("categorized %r -> %s (raw %r, %.0f ms)", concept, result, raw[:120], elapsed_ms)
+    if result == _FALLBACK:
+        logger.warning("Result is Otros/General: the answer did not match the taxonomy or the model chose it (%.0f ms)", elapsed_ms)
+    return result

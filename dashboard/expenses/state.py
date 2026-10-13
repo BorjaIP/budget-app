@@ -1,3 +1,5 @@
+import logging
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import List
@@ -7,6 +9,12 @@ import reflex as rx
 from dashboard.database.operations import db_manager
 from dashboard.expenses.model import Item
 from dashboard.utils.file_processor import file_processor
+
+logger = logging.getLogger(__name__)
+
+# Categorization before the last "Recategorizar", per browser session. Kept out of the
+# reactive state because it can hold thousands of rows that must not travel to the client.
+_UNDO_SNAPSHOTS: dict[str, list[tuple]] = {}
 
 
 def _format_currency(value: float) -> str:
@@ -22,7 +30,23 @@ def _humanize_date(iso: str) -> str:
         return iso
 
 
-def _to_item(expense) -> Item:
+def highlight_segments(text: str, term: str) -> list[dict]:
+    """Split `text` into pieces flagged `m` when they match `term` (case-insensitive)."""
+    if not term:
+        return [{"t": text, "m": False}]
+    lower, needle = text.lower(), term.lower()
+    pieces, start = [], 0
+    while (hit := lower.find(needle, start)) != -1:
+        if hit > start:
+            pieces.append({"t": text[start:hit], "m": False})
+        pieces.append({"t": text[hit : hit + len(needle)], "m": True})
+        start = hit + len(needle)
+    if start < len(text):
+        pieces.append({"t": text[start:], "m": False})
+    return pieces or [{"t": text, "m": False}]
+
+
+def _to_item(expense, search: str = "") -> Item:
     amount = float(expense.amount)
     balance = float(expense.balance)
     return Item(
@@ -32,7 +56,7 @@ def _to_item(expense) -> Item:
         value_date=expense.value_date,
         concept=expense.concept,
         amount=amount,
-        amount_fmt=_format_currency(amount),
+        amount_fmt=("+" if amount > 0 else "") + _format_currency(amount),
         balance=balance,
         balance_fmt=_format_currency(balance),
         is_expense=amount < 0,
@@ -40,6 +64,7 @@ def _to_item(expense) -> Item:
         subcategory=expense.subcategory,
         bank_name=expense.bank_name,
         is_categorized=bool(expense.is_categorized),
+        concept_segments=highlight_segments(expense.concept, search.strip()),
     )
 
 
@@ -56,14 +81,24 @@ class TableState(rx.State):
     limit: int = 12
 
     upload_status: str = ""
+    upload_error: bool = False
     is_uploading: bool = False
     show_upload_modal: bool = False
     pending_bank_name: str = ""
+    preview_ready: bool = False
+    preview_path: str = ""
+    preview_new: int = 0
+    preview_duplicates: int = 0
+    preview_range: str = ""
+    preview_income_fmt: str = ""
+    preview_spending_fmt: str = ""
 
     is_loading: bool = False
     is_categorizing: bool = False
     categorization_progress: int = 0
     categorization_total: int = 0
+    can_undo_recategorize: bool = False
+    selected_ids: list[int] = []
 
     selected_categories: list[str] = []
     selected_banks: list[str] = []
@@ -72,6 +107,14 @@ class TableState(rx.State):
     amount_min: str = ""
     amount_max: str = ""
     flow_filter: str = "all"  # all | income | expense
+
+    @rx.var(cache=True)
+    def selected_count(self) -> int:
+        return len(self.selected_ids)
+
+    @rx.var(cache=True)
+    def page_all_selected(self) -> bool:
+        return bool(self.items) and all(item.id in self.selected_ids for item in self.items)
 
     @rx.var(cache=True)
     def filtered_count(self) -> int:
@@ -169,7 +212,7 @@ class TableState(rx.State):
                 sort=self.sort_value,
                 sort_dir="desc" if self.sort_reverse else "asc",
             )
-            self.items = [_to_item(r) for r in rows]
+            self.items = [_to_item(r, self.search_value) for r in rows]
             self.total_items = total
             self.items_list = [
                 "operation_date",
@@ -181,10 +224,11 @@ class TableState(rx.State):
             ]
             if self.offset >= max(self.total_items, 1):
                 self.offset = 0
-        except Exception as exc:
+        except Exception:
+            logger.exception("Could not load the expenses")
             self.items = []
             self.total_items = 0
-            return rx.toast.error(f"Error cargando movimientos: {exc}")
+            return rx.toast.error("No se pudieron cargar los movimientos")
         finally:
             self.is_loading = False
 
@@ -267,6 +311,26 @@ class TableState(rx.State):
         self.offset = 0
         return TableState.load_entries_from_database
 
+    def drill_down(self, category: str, date_from: str, date_to: str, flow: str):
+        """Arrive from the overview with a category and period already applied."""
+        self.search_value = ""
+        self.selected_categories = [category]
+        self.selected_banks = []
+        self.date_from = date_from
+        self.date_to = date_to
+        self.amount_min = ""
+        self.amount_max = ""
+        self.flow_filter = flow
+        self.offset = 0
+        return TableState.load_entries_from_database
+
+    def drill_down_search(self, text: str, date_from: str, date_to: str):
+        """Arrive from the overview with a concept search and period already applied."""
+        self.drill_down("", date_from, date_to, "expense")
+        self.selected_categories = []
+        self.search_value = text
+        return TableState.load_entries_from_database
+
     def clear_filters(self):
         self.search_value = ""
         self.selected_categories = []
@@ -278,6 +342,31 @@ class TableState(rx.State):
         self.flow_filter = "all"
         self.offset = 0
         return TableState.load_entries_from_database
+
+    def toggle_selected(self, expense_id: int):
+        if expense_id in self.selected_ids:
+            self.selected_ids = [i for i in self.selected_ids if i != expense_id]
+        else:
+            self.selected_ids = [*self.selected_ids, expense_id]
+
+    def toggle_page_selection(self):
+        page_ids = [item.id for item in self.items]
+        if page_ids and all(i in self.selected_ids for i in page_ids):
+            self.selected_ids = [i for i in self.selected_ids if i not in page_ids]
+        else:
+            self.selected_ids = [*self.selected_ids, *[i for i in page_ids if i not in self.selected_ids]]
+
+    def clear_selection(self):
+        self.selected_ids = []
+
+    def apply_bulk_category(self, category: str):
+        """Tag every selected movement by hand; manual tags feed the few-shot prompt."""
+        if not self.selected_ids or not category:
+            return
+        done = sum(db_manager.update_category(i, category, None, source="manual") for i in self.selected_ids)
+        self.selected_ids = []
+        self.load_entries_from_database()
+        return rx.toast.success(f"{done} movimientos asignados a {category}")
 
     def update_expense_category(self, expense_id: int, category: str, subcategory: str = ""):
         ok = db_manager.update_category(expense_id, category, subcategory or None, source="manual")
@@ -297,78 +386,131 @@ class TableState(rx.State):
             rx.toast.success("Movimiento borrado"),
         ]
 
-    async def handle_upload(self, files: list[rx.UploadFile]):
+    async def handle_preview(self, files: list[rx.UploadFile]):
+        """Parse the chosen file and show what an import would do, without storing anything."""
+        self._reset_preview()
         if not files:
             self.upload_status = "Sin archivo seleccionado"
+            self.upload_error = True
+            return
+        file = files[0]
+        if not file.filename or not file.filename.lower().endswith((".xls", ".xlsx")):
+            self.upload_status = "Sólo se aceptan archivos .xls o .xlsx"
+            self.upload_error = True
             return
         self.is_uploading = True
-        self.upload_status = "Procesando archivo..."
+        self.upload_error = False
+        self.upload_status = ""
         try:
-            for file in files:
-                if not file.filename:
-                    self.upload_status = "❌ Archivo inválido"
-                    continue
-                if not file.filename.lower().endswith((".xls", ".xlsx")):
-                    self.upload_status = "❌ Sólo se aceptan archivos .xls o .xlsx"
-                    continue
-
-                upload_data = await file.read()
-                outfile = rx.get_upload_dir() / Path(file.filename).name
-                outfile.parent.mkdir(parents=True, exist_ok=True)
-                outfile.write_bytes(upload_data)
-
-                bank = self.pending_bank_name.strip() or None
-                result = file_processor.process_excel_file(str(outfile), bank_name=bank)
-
-                if result["status"] == "success":
-                    self.upload_status = f"✅ {result['message']}"
-                    self.show_upload_modal = False
-                    self.pending_bank_name = ""
-                    self.offset = 0
-                    self.load_entries_from_database()
-                    try:
-                        outfile.unlink()
-                    except OSError:
-                        pass
-                    yield rx.toast.success(result["message"])
-                    yield TableState.categorize_pending_expenses
-                else:
-                    self.upload_status = f"❌ {result['message']}"
-                    yield rx.toast.error(result["message"])
-        except Exception as exc:
-            self.upload_status = f"❌ Error: {exc}"
-            yield rx.toast.error(str(exc))
+            outfile = rx.get_upload_dir() / Path(file.filename).name
+            outfile.parent.mkdir(parents=True, exist_ok=True)
+            outfile.write_bytes(await file.read())
+            preview = file_processor.preview_excel_file(
+                str(outfile), bank_name=self.pending_bank_name.strip() or None
+            )
+            if preview["status"] != "success":
+                outfile.unlink(missing_ok=True)
+                self.upload_status = preview["message"]
+                self.upload_error = True
+                return
+            self.preview_path = str(outfile)
+            self.preview_new = preview["new"]
+            self.preview_duplicates = preview["duplicates"]
+            self.preview_range = (
+                f"{_humanize_date(preview['date_from'])} a {_humanize_date(preview['date_to'])}"
+            )
+            self.preview_income_fmt = _format_currency(preview["income"])
+            self.preview_spending_fmt = _format_currency(preview["spending"])
+            self.preview_ready = True
+        except Exception:
+            logger.exception("Could not read the uploaded file")
+            self.upload_status = "No se pudo leer el archivo. Comprueba que sea un extracto válido."
+            self.upload_error = True
         finally:
             self.is_uploading = False
+
+    def _reset_preview(self):
+        if self.preview_path:
+            Path(self.preview_path).unlink(missing_ok=True)
+        self.preview_ready = False
+        self.preview_path = ""
+        self.preview_new = 0
+        self.preview_duplicates = 0
+        self.preview_range = ""
+        self.preview_income_fmt = ""
+        self.preview_spending_fmt = ""
+
+    def discard_preview(self):
+        self._reset_preview()
+        self.upload_status = ""
+        self.upload_error = False
+        return rx.clear_selected_files("upload-excel")
+
+    def confirm_import(self):
+        """Store the previewed file (duplicates are skipped) and categorize the new rows."""
+        if not self.preview_path:
+            return
+        self.is_uploading = True
+        try:
+            result = file_processor.process_excel_file(
+                self.preview_path, bank_name=self.pending_bank_name.strip() or None
+            )
+        except Exception:
+            logger.exception("Could not import the file")
+            self.is_uploading = False
+            return rx.toast.error("No se pudo importar el archivo")
+        self.is_uploading = False
+        if result["status"] != "success":
+            self.upload_status = result["message"]
+            self.upload_error = True
+            return rx.toast.error(result["message"])
+        self._reset_preview()
+        self.show_upload_modal = False
+        self.pending_bank_name = ""
+        self.offset = 0
+        self.upload_status = ""
+        self.load_entries_from_database()
+        return [rx.toast.success(result["message"]), TableState.categorize_pending_expenses]
 
     @rx.event(background=True)
     async def categorize_pending_expenses(self):
         from dashboard.llm.llm_call import categorize_expense
+        from dashboard.llm.run_stats import RunStats
+
+        stats = RunStats()
 
         async with self:
             self.is_categorizing = True
             self.categorization_progress = 0
             pending = db_manager.get_uncategorized_expenses(limit=500)
             self.categorization_total = len(pending)
+        logger.info("categorization run started: %d movements pending", len(pending))
 
         if not pending:
             async with self:
                 self.is_categorizing = False
             return
 
+        assigned = 0
         for index, expense in enumerate(pending):
+            started = time.perf_counter()
             try:
                 category, subcategory = await categorize_expense(expense.concept)
-            except Exception as exc:
+            except Exception:
+                stats.record_error()
+                logger.exception("The local model is not available")
+                logger.info(stats.summary())
                 async with self:
                     self.is_categorizing = False
                 yield rx.toast.warning(
-                    f"Ollama no disponible ({exc.__class__.__name__}); las filas restantes "
-                    "quedan sin categorizar."
+                    "El modelo local no está disponible. Las filas restantes quedan sin categorizar."
                 )
                 return
 
+            stats.record(category, subcategory, (time.perf_counter() - started) * 1000)
             db_manager.update_category(expense.id, category, subcategory, source="llm")
+            if category:
+                assigned += 1
 
             async with self:
                 self.categorization_progress = index + 1
@@ -378,8 +520,27 @@ class TableState(rx.State):
         async with self:
             self.is_categorizing = False
             self.load_entries_from_database()
+        async with self:
+            self.can_undo_recategorize = self.router.session.client_token in _UNDO_SNAPSHOTS
+        logger.info(stats.summary())
+        left = len(pending) - assigned
+        message = f"Categorizados {assigned} de {len(pending)} movimientos."
+        if left:
+            message += f" {left} quedan sin categorizar; puedes asignarlos a mano."
+        yield rx.toast.success(message)
+
+    def undo_recategorize(self):
+        snapshot = _UNDO_SNAPSHOTS.pop(self.router.session.client_token, None)
+        self.can_undo_recategorize = False
+        if not snapshot:
+            return rx.toast.info("No hay nada que deshacer")
+        restored = db_manager.restore_categorization(snapshot)
+        self.load_entries_from_database()
+        return rx.toast.success(f"Categorías anteriores restauradas en {restored} movimientos")
 
     def force_recategorize(self):
+        _UNDO_SNAPSHOTS[self.router.session.client_token] = db_manager.snapshot_categorization()
+        self.can_undo_recategorize = False
         count = db_manager.reset_categorization()
         if count == 0:
             return rx.toast.info("No hay movimientos para recategorizar")
@@ -389,7 +550,9 @@ class TableState(rx.State):
         ]
 
     def open_upload_modal(self):
+        self._reset_preview()
         self.upload_status = ""
+        self.upload_error = False
         self.pending_bank_name = ""
         self.show_upload_modal = True
         return rx.clear_selected_files("upload-excel")
@@ -400,9 +563,15 @@ class TableState(rx.State):
     @rx.event
     def set_show_upload_modal(self, value: bool):
         self.show_upload_modal = value
+        if not value:
+            self._reset_preview()
 
     def set_pending_bank_name(self, value: str):
         self.pending_bank_name = value
+        if self.preview_ready:
+            # The bank name is part of the duplicate check, so the preview no longer applies.
+            self._reset_preview()
+            return rx.clear_selected_files("upload-excel")
 
     def export_csv(self):
         import csv

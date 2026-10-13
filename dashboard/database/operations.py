@@ -7,7 +7,7 @@ from sqlmodel import Session, SQLModel, asc, create_engine, desc, select
 
 from dashboard.config import settings
 
-from .models import Expense, ExpenseCreate
+from .models import CategoryBudget, Expense, ExpenseCreate
 
 
 SORTABLE_COLUMNS = {
@@ -238,6 +238,34 @@ class DatabaseManager:
             session.commit()
             return len(rows)
 
+    def snapshot_categorization(self) -> list[tuple]:
+        """Current categorization of every row `reset_categorization` may overwrite."""
+        with self.get_session() as session:
+            statement = select(Expense).where(
+                or_(Expense.category_source.is_(None), Expense.category_source != "manual")  # type: ignore[union-attr]
+            )
+            return [
+                (r.id, r.category, r.subcategory, r.is_categorized, r.category_source)
+                for r in session.exec(statement).all()
+            ]
+
+    def restore_categorization(self, snapshot: list[tuple]) -> int:
+        """Put the categorization captured by `snapshot_categorization` back."""
+        restored = 0
+        with self.get_session() as session:
+            for expense_id, category, subcategory, categorized, source in snapshot:
+                row = session.get(Expense, expense_id)
+                if row is None:
+                    continue
+                row.category = category
+                row.subcategory = subcategory
+                row.is_categorized = categorized
+                row.category_source = source
+                session.add(row)
+                restored += 1
+            session.commit()
+        return restored
+
     def delete_expense(self, expense_id: int) -> bool:
         with self.get_session() as session:
             expense = session.get(Expense, expense_id)
@@ -340,30 +368,81 @@ class DatabaseManager:
         with self.get_session() as session:
             rows = session.exec(select(Expense)).all()
 
-        totals: dict[str, dict[str, float]] = defaultdict(lambda: {"ingresos": 0.0, "gastos": 0.0})
+        totals: dict[str, dict[str, float]] = defaultdict(lambda: {"income": 0.0, "spending": 0.0})
         for row in rows:
             year = row.operation_date[:4]
             if row.amount > 0:
-                totals[year]["ingresos"] += row.amount
+                totals[year]["income"] += row.amount
             else:
-                totals[year]["gastos"] += abs(row.amount)
+                totals[year]["spending"] += abs(row.amount)
 
         result = []
         for year in sorted(totals.keys()):
-            ingresos = totals[year]["ingresos"]
-            gastos = totals[year]["gastos"]
-            ahorro = ingresos - gastos
-            rate = (ahorro / ingresos * 100) if ingresos > 0 else 0.0
+            income = totals[year]["income"]
+            spending = totals[year]["spending"]
+            savings = income - spending
+            rate = (savings / income * 100) if income > 0 else 0.0
             result.append(
                 {
                     "year": year,
-                    "ingresos": round(ingresos, 2),
-                    "gastos": round(gastos, 2),
-                    "ahorro": round(ahorro, 2),
+                    "income": round(income, 2),
+                    "spending": round(spending, 2),
+                    "savings": round(savings, 2),
                     "savings_rate": round(rate, 1),
                 }
             )
         return result
+
+    def get_flow_totals(
+        self, date_from: str | None = None, date_to: str | None = None
+    ) -> dict[str, float]:
+        """Total income and spending (positive numbers) within an optional date range."""
+        with self.get_session() as session:
+            statement = select(Expense.amount)
+            if date_from:
+                statement = statement.where(Expense.operation_date >= date_from)
+            if date_to:
+                statement = statement.where(Expense.operation_date <= date_to)
+            amounts = session.exec(statement).all()
+        return {
+            "income": round(sum(a for a in amounts if a > 0), 2),
+            "spending": round(sum(-a for a in amounts if a < 0), 2),
+        }
+
+    def count_existing_hashes(self, hashes: list[str]) -> int:
+        """How many of these dedupe hashes are already stored."""
+        if not hashes:
+            return 0
+        with self.get_session() as session:
+            statement = (
+                select(func.count())
+                .select_from(Expense)
+                .where(Expense.dedupe_hash.in_(hashes))  # type: ignore[attr-defined]
+            )
+            return int(session.exec(statement).one())
+
+    def get_budgets(self) -> dict[str, float]:
+        with self.get_session() as session:
+            return {b.category: b.monthly_limit for b in session.exec(select(CategoryBudget)).all()}
+
+    def set_budget(self, category: str, monthly_limit: float | None) -> None:
+        """Store the monthly limit of a category; a missing or non-positive limit removes it."""
+        with self.get_session() as session:
+            budget = session.get(CategoryBudget, category)
+            if monthly_limit is None or monthly_limit <= 0:
+                if budget is not None:
+                    session.delete(budget)
+            elif budget is None:
+                session.add(CategoryBudget(category=category, monthly_limit=monthly_limit))
+            else:
+                budget.monthly_limit = monthly_limit
+                session.add(budget)
+            session.commit()
+
+    def count_uncategorized(self) -> int:
+        with self.get_session() as session:
+            statement = select(func.count()).select_from(Expense).where(Expense.category.is_(None))  # type: ignore[union-attr]
+            return int(session.exec(statement).one())
 
     def get_recent_expenses(self, limit: int = 8) -> list[Expense]:
         with self.get_session() as session:

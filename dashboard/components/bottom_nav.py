@@ -1,38 +1,36 @@
 import reflex as rx
 
 from .. import styles
+from .icon import icon
+from .nav_items import NAV_ITEMS, is_active
 
 
-_ITEMS = [
-    ("/", "Resumen", "home"),
-    ("/expenses", "Gastos", "receipt"),
-    ("/settings", "Ajustes", "settings"),
-]
-
-
-def _item(href: str, label: str, icon: str) -> rx.Component:
-    active = rx.State.router.page.path == href
+def _item(href: str, label: str, glyph: str) -> rx.Component:
+    active = is_active(href)
     return rx.link(
         rx.vstack(
-            rx.icon(icon, size=22),
-            rx.text(label, size="1", weight="medium"),
+            icon(glyph, size=20),
+            rx.text(label, size="1", style={"font_size": "0.6875rem", "white_space": "nowrap"}),
             spacing="1",
             align="center",
         ),
         href=href,
         underline="none",
         flex="1",
+        min_width="0",
         padding_y="0.5em",
         text_align="center",
-        color=rx.cond(active, styles.accent_text_color, rx.color("gray", 11)),
-        background=rx.cond(active, styles.accent_bg_color, "transparent"),
+        color=rx.cond(active, rx.color("gray", 12), rx.color("gray", 11)),
+        font_weight=rx.cond(active, "500", "400"),
+        border_top=rx.cond(active, "2px solid var(--gray-12)", "2px solid transparent"),
+        custom_attrs={"aria-current": rx.cond(active, "page", "false")},
     )
 
 
 def bottom_nav() -> rx.Component:
     return rx.box(
         rx.hstack(
-            *[_item(href, label, icon) for href, label, icon in _ITEMS],
+            *[_item(href, label, icon) for href, label, icon in NAV_ITEMS],
             width="100%",
             spacing="0",
             justify="center",
@@ -45,5 +43,5 @@ def bottom_nav() -> rx.Component:
         z_index="20",
         background_color=rx.color("gray", 1),
         border_top=styles.border,
-        padding="0.25em 0.5em env(safe-area-inset-bottom, 0.25em)",
+        padding="0 0.5em env(safe-area-inset-bottom, 0)",
     )

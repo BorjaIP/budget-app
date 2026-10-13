@@ -214,3 +214,9 @@ odd/
 
 # Personal bank data: never commit
 data/
+
+# Reflex frontend dependency lock (regenerated on demand)
+reflex.lock/
+
+# Personal notes (not shared)
+TODO.md

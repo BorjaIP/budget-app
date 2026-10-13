@@ -65,6 +65,29 @@ class FileProcessor:
                 "skipped": 0,
             }
 
+    def preview_excel_file(self, file_path: str, bank_name: str | None = None) -> dict:
+        """Parse a bank export without storing anything: counts, range and totals."""
+        try:
+            records = self.file_reader.read_file_to_records(file_path, bank_name=bank_name)
+        except Exception as exc:
+            return {"status": "error", "message": f"No se pudo leer el archivo: {exc}"}
+        if not records:
+            return {"status": "error", "message": "No se encontraron movimientos válidos en el archivo."}
+
+        hashes = list({r["dedupe_hash"] for r in records})
+        duplicates = db_manager.count_existing_hashes(hashes)
+        dates = sorted(r["operation_date"] for r in records)
+        return {
+            "status": "success",
+            "total": len(records),
+            "new": max(len(hashes) - duplicates, 0),
+            "duplicates": duplicates,
+            "date_from": dates[0],
+            "date_to": dates[-1],
+            "income": round(sum(r["amount"] for r in records if r["amount"] > 0), 2),
+            "spending": round(-sum(r["amount"] for r in records if r["amount"] < 0), 2),
+        }
+
     def get_uploaded_files(self) -> List[str]:
         return [f.name for f in self.temp_folder.iterdir() if f.is_file()]
 

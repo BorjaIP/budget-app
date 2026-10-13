@@ -20,6 +20,8 @@ Personal budget/expense management app built with **Reflex** (Python full-stack 
   `dashboard/database/operations.py` creates `db_manager` at import time and opens the database lazily on
   first use (`data/expenses.db`, relative to the cwd, for the default SQLite URL): tests must
   `monkeypatch.chdir(tmp_path)` before touching it.
+- To look at the UI, use `scripts/ui_preview.sh` (it seeds an invented database with
+  `scripts/seed_demo_data.py`); never screenshot or open the app running on the real database.
 - A script that must run against real data prints aggregates only (counts, percentages, timings),
   never concept text, amounts or dates of individual rows.
 - `.env` may hold credentials and settings overrides: never read, print or commit it. Validate the compose
@@ -37,6 +39,7 @@ make docker-up    # build and start the full stack (app + Ollama + PostgreSQL)
 make docker-down  # stop the stack
 
 uv run pytest tests/ -q          # unit tests (synthetic data only)
+scripts/ui_preview.sh /tmp/shots # screenshots (desktop/mobile, light/dark) of a throwaway copy with synthetic demo data
 uv add 'package<=X.Y.Z'          # add a dependency, pinned with an upper bound (see below)
 ```
 
@@ -54,11 +57,18 @@ The Reflex app is configured in `rxconfig.py` with `app_name="dashboard"`. Entry
 
 - **Pages** (`pages/`): route handlers. The expenses page is at `expenses/page.py` → `/expenses`.
 - **State** (`expenses/state.py`): `TableState`, the Reflex reactive state for pagination, filtering, sorting, uploads, categorization and database access.
-- **Config** (`config.py`): `Settings` (pydantic-settings) reads environment variables and `.env`: `DATABASE_URL` (default `sqlite:///data/expenses.db`; PostgreSQL in Docker), `OLLAMA_BASE_URL`, `uploaded_files_dir`.
+- **Config** (`config.py`): `Settings` (pydantic-settings) reads environment variables and `.env`: `DATABASE_URL` (default `sqlite:///data/expenses.db`; PostgreSQL in Docker), `OLLAMA_BASE_URL`, `LOG_LEVEL`, `uploaded_files_dir`.
 - **Database** (`database/`): `DatabaseManager` in `operations.py` wraps SQLModel and creates its engine lazily from `settings.database_url`. `models.py` defines the `Expense` table. Schema changes on existing SQLite databases go through the additive guarded migration in `DatabaseManager._migrate_schema` (SQLite only; there is no Alembic).
 - **File processing** (`utils/`): `FileReader` parses uploaded `.xls`/`.xlsx` bank exports with Pandas (`xlrd` for `.xls`, `openpyxl` for `.xlsx`). `FileProcessor` handles the upload-to-database pipeline with deduplication.
 - **LLM** (`llm/`): `llm_call.py` calls Ollama (default model `qwen2.5:3b-instruct`) at `settings.ollama_base_url` (env `OLLAMA_BASE_URL`, default `http://localhost:11434`). The prompt (`prompt.py`) asks for `[Category][Subcategory]`; few-shot examples come from rows the user tagged by hand (`category_source = "manual"`), falling back to static examples. `CATEGORY_TAXONOMY` is reviewed by the owner: **never change its categories or subcategories**.
 - **UI components** (`components/`), **templates** (`templates/template.py`), **styles** (`styles.py`, Radix UI theme).
+
+### Logging
+
+The `dashboard` logger writes to stdout (`docker logs budget-app`). At `INFO` a categorization run logs only
+aggregates (`RunStats.summary()`: counts, fallbacks to Otros/General, errors, average ms, top categories) and
+warns on every fallback. Concepts and raw model answers come from bank data and are logged only with
+`LOG_LEVEL=DEBUG`; never paste those logs anywhere.
 
 ### Data flow
 
@@ -78,8 +88,33 @@ The Reflex app is configured in `rxconfig.py` with `app_name="dashboard"`. Entry
 
 No VPN container is part of the stack.
 
+## UI conventions
+
+Minimalist look: warm sand grays, a neutral accent, 1px hairline borders, no shadows or gradients,
+Geist (self-hosted in `assets/fonts`), sentence case and no emojis.
+
+- Reuse the shared pieces: `components/card.py` (surface), `page_header.py`, `empty_state.py`,
+  `notice.py` (inline error with retry) and `icon.py` (Radix Icons; do not use `rx.icon`, it renders Lucide).
+- Money and counters use `class_name="num"` (tabular digits) and are right-aligned in tables. Color is
+  semantic only: green for income and positive savings, red for expenses, negative savings and errors;
+  expenses and income must always be distinguishable at a glance (amounts, totals and chart series).
+- Icon-only controls and inputs without a visible label need an accessible name
+  (`custom_attrs={"aria-label": ...}`); active navigation sets `aria-current`.
+- Loading uses skeletons. Failures are logged with `logging` and shown as `error_notice`; raw exceptions
+  never reach the user.
+- Reflex 0.10 specifics: `set_<var>` setters are not generated (declare them), responsive enum props use
+  `rx.breakpoints(...)`, and decorated pages must be imported in `dashboard/dashboard.py`.
+- The overview period (`dashboard/periods.py`: Mes, 3 meses, 12 meses, Año, Todo, or a year) is anchored on the
+  newest date in the data; category rows and the "sin categorizar" notice drill down into Gastos via
+  `TableState.drill_down`.
+- Charts follow the `data-visualization` skill: start bar axes at zero, give every chart a text alternative
+  (`chart_summary`), mark benchmarks (dashed average line) and do not rely on color alone (income carries a `+`).
+- Check changes with `scripts/ui_preview.sh` (desktop and mobile, light and dark) and keep
+  `tests/test_app_compiles.py` green; an HTTP 200 from the dev server does not prove a page exists.
+
 ## Conventions
 
 - Conventional Commits. Never stage unrelated work: add explicit paths, not `git add -A`.
-- Generated technical artifacts (code, comments, docs, tests) are written in English.
+- Generated technical artifacts (code, identifiers, file names, routes, comments, docs, tests) are written in English;
+  only text the user sees in the UI is Spanish (and data values such as the category names).
 - `odd/` and `.atl/` are local gentle-ai workflow files and are git-ignored.

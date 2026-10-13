@@ -21,10 +21,18 @@ default_meta = [
 
 
 class ThemeState(rx.State):
-    accent_color: str = "teal"
-    gray_color: str = "gray"
-    radius: str = "large"
+    accent_color: str = "gray"
+    gray_color: str = "sand"
+    radius: str = "medium"
     scaling: str = "100%"
+
+    @rx.event
+    def set_accent_color(self, value: str):
+        self.accent_color = value
+
+    @rx.event
+    def set_gray_color(self, value: str):
+        self.gray_color = value
 
     @rx.event
     def set_radius(self, value: str):
@@ -87,6 +95,7 @@ def template(
             return rx.theme(
                 templated_page(),
                 has_background=True,
+                panel_background="solid",
                 accent_color=ThemeState.accent_color,
                 gray_color=ThemeState.gray_color,
                 radius=ThemeState.radius,

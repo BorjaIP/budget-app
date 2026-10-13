@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     # Reflex / runtime
     # ------------------------------------------------------------------
     uploaded_files_dir: str = "data/uploaded_files"
+    # INFO logs counts and timings only; DEBUG also logs concepts and model answers.
+    log_level: str = "INFO"
 
 
 settings = Settings()

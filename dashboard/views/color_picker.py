@@ -2,18 +2,22 @@ import reflex as rx
 from reflex.components.radix.themes.base import LiteralAccentColor, LiteralGrayColor
 
 from .. import styles
+from ..components.icon import icon
 from ..templates.template import ThemeState
 
-primary_color_dict: dict[str, str] = {
-    color.capitalize(): f"linear-gradient(45deg, {rx.color(color, 10)}, {rx.color(color, 8)})"
-    for color in LiteralAccentColor.__args__
-}
 
-secondary_color_dict: dict[str, str] = {
-    color.capitalize(): f"linear-gradient(45deg, {rx.color(color, 10)}, {rx.color(color, 8)})"
-    for color in LiteralGrayColor.__args__
-    if color != "auto"  # Remove auto from the list
-}
+def _swatches(names: list[str]) -> dict[str, str]:
+    return {name.capitalize(): f"{rx.color(name, 9)}" for name in names}
+
+
+# Gray first: it is the neutral default of the minimalist theme.
+primary_color_dict: dict[str, str] = _swatches(
+    ["gray", *[c for c in LiteralAccentColor.__args__ if c != "gray"]]
+)
+
+secondary_color_dict: dict[str, str] = _swatches(
+    [c for c in LiteralGrayColor.__args__ if c != "auto"]
+)
 
 
 class ColorPickerState(rx.State):
@@ -21,56 +25,36 @@ class ColorPickerState(rx.State):
     secondary_color_options: dict[str, str] = secondary_color_dict
 
 
-def _display_primary_color(color: list) -> rx.Component:
+def _swatch(option: list, current_value, event) -> rx.Component:
+    name, color = option[0], option[1]
+    selected = name.lower() == current_value.lower()
     return rx.tooltip(
-        rx.box(
-            rx.cond(
-                color[0].lower() == ThemeState.accent_color.lower(),
-                rx.box(
-                    rx.icon("check", color=rx.color("gray", 12)),
-                    bg=color[1],
-                    height=styles.color_box_size,
-                    width=styles.color_box_size,
-                    border=f"2px solid  {rx.color('gray', 12)}",
-                    style=styles.color_picker_style,
-                ),
-                rx.box(
-                    bg=color[1],
-                    height=styles.color_box_size,
-                    width=styles.color_box_size,
-                    style=styles.color_picker_style,
-                ),
-            ),
-            on_click=ThemeState.setvar("accent_color", color[0].lower()),
+        rx.el.button(
+            rx.cond(selected, icon("check", size=14, color=rx.color("gray", 1)), rx.fragment()),
+            type="button",
+            on_click=event(name.lower()),
+            style={
+                **styles.color_picker_style,
+                "background": color,
+                "height": styles.color_box_size,
+                "width": styles.color_box_size,
+                "border": "none",
+                "padding": "0",
+                "outline": rx.cond(selected, f"2px solid {rx.color('gray', 12)}", "none"),
+                "outline_offset": "2px",
+            },
+            custom_attrs={"aria-label": name, "aria-pressed": rx.cond(selected, "true", "false")},
         ),
-        content=color[0],
+        content=name,
     )
 
 
-def _display_secondary_color(colors: list) -> rx.Component:
-    return rx.tooltip(
-        rx.box(
-            rx.cond(
-                colors[0].lower() == ThemeState.gray_color.lower(),
-                rx.box(
-                    rx.icon("check", color=rx.color("gray", 12)),
-                    bg=colors[1],
-                    height=styles.color_box_size,
-                    width=styles.color_box_size,
-                    border=f"2px solid  {rx.color('gray', 12)}",
-                    style=styles.color_picker_style,
-                ),
-                rx.box(
-                    bg=colors[1],
-                    height=styles.color_box_size,
-                    width=styles.color_box_size,
-                    style=styles.color_picker_style,
-                ),
-            ),
-            on_click=ThemeState.setvar("gray_color", colors[0].lower()),
-        ),
-        content=colors[0],
-    )
+def _display_primary_color(option: list) -> rx.Component:
+    return _swatch(option, ThemeState.accent_color, lambda value: ThemeState.setvar("accent_color", value))
+
+
+def _display_secondary_color(option: list) -> rx.Component:
+    return _swatch(option, ThemeState.gray_color, lambda value: ThemeState.setvar("gray_color", value))
 
 
 def primary_color_picker() -> rx.Component:
@@ -79,7 +63,7 @@ def primary_color_picker() -> rx.Component:
         width="100%",
         max_width="40rem",
         wrap="wrap",
-        gap=["15px", "15px", "20px"],
+        gap=["12px", "12px", "16px"],
     )
 
 
@@ -89,5 +73,5 @@ def secondary_color_picker() -> rx.Component:
         width="100%",
         max_width="40rem",
         wrap="wrap",
-        gap=["15px", "15px", "20px"],
+        gap=["12px", "12px", "16px"],
     )

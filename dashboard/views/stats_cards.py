@@ -3,13 +3,14 @@ import reflex as rx
 from ..views.charts import StatsState
 
 
-def _stat(label: str, value_var) -> rx.Component:
+def _stat(label: str, value_var, color=None) -> rx.Component:
     return rx.vstack(
         rx.text(label, size="2", color=rx.color("gray", 11)),
         rx.skeleton(
             rx.heading(
                 value_var,
                 as_="p",
+                color=color if color is not None else rx.color("gray", 12),
                 size=rx.breakpoints(initial="4", sm="5", lg="6"),
                 weight="medium",
                 letter_spacing="-0.02em",
@@ -29,8 +30,8 @@ def _stat(label: str, value_var) -> rx.Component:
 def budget_stats_cards() -> rx.Component:
     """One bordered strip; the 1px gaps show the container color as dividers."""
     return rx.grid(
-        _stat("Ingresos", StatsState.total_ingresos_fmt),
-        _stat("Gastos", StatsState.total_gastos_fmt),
+        _stat("Ingresos", StatsState.total_ingresos_fmt, rx.color("green", 11)),
+        _stat("Gastos", StatsState.total_gastos_fmt, rx.color("red", 11)),
         _stat("Saldo", StatsState.saldo_neto_fmt),
         _stat("Tasa de ahorro", StatsState.savings_rate_fmt),
         gap="1px",

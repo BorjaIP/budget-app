@@ -89,7 +89,8 @@ Geist (self-hosted in `assets/fonts`), sentence case and no emojis.
 - Reuse the shared pieces: `components/card.py` (surface), `page_header.py`, `empty_state.py`,
   `notice.py` (inline error with retry) and `icon.py` (Radix Icons; do not use `rx.icon`, it renders Lucide).
 - Money and counters use `class_name="num"` (tabular digits) and are right-aligned in tables. Color is
-  semantic only: green for income and positive savings, red for negative savings and errors.
+  semantic only: green for income and positive savings, red for expenses, negative savings and errors;
+  expenses and income must always be distinguishable at a glance (amounts, totals and chart series).
 - Icon-only controls and inputs without a visible label need an accessible name
   (`custom_attrs={"aria-label": ...}`); active navigation sets `aria-current`.
 - Loading uses skeletons. Failures are logged with `logging` and shown as `error_notice`; raw exceptions

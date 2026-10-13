@@ -25,7 +25,7 @@ def _hairline() -> str:
 def _amount_text(item: Item) -> rx.Component:
     return rx.text(
         item.amount_fmt,
-        color=rx.cond(item.is_expense, rx.color("gray", 12), rx.color("green", 11)),
+        color=rx.cond(item.is_expense, rx.color("red", 11), rx.color("green", 11)),
         weight="medium",
         class_name="num",
         white_space="nowrap",

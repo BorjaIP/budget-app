@@ -88,9 +88,9 @@ def yearly_compare_chart() -> rx.Component:
             rx.recharts.bar_chart(
                 _custom_tooltip(),
                 rx.recharts.cartesian_grid(horizontal=True, vertical=False),
-                rx.recharts.bar(name="Ingresos", data_key="ingresos", fill=rx.color("gray", 12)),
-                rx.recharts.bar(name="Gastos", data_key="gastos", fill=rx.color("gray", 8)),
-                rx.recharts.bar(name="Ahorro", data_key="ahorro", fill=rx.color("green", 9)),
+                rx.recharts.bar(name="Ingresos", data_key="ingresos", fill=rx.color("green", 9)),
+                rx.recharts.bar(name="Gastos", data_key="gastos", fill=rx.color("red", 9)),
+                rx.recharts.bar(name="Ahorro", data_key="ahorro", fill=rx.color("gray", 12)),
                 _x_axis("year"),
                 rx.recharts.y_axis(
                     tick_formatter=_Y_TICK_FORMATTER,

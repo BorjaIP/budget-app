@@ -27,7 +27,7 @@ def _row(item: RecentRow) -> rx.Component:
             class_name="num",
             flex_shrink="0",
             style={"white_space": "nowrap"},
-            color=rx.cond(item.is_expense, rx.color("gray", 12), rx.color("green", 11)),
+            color=rx.cond(item.is_expense, rx.color("red", 11), rx.color("green", 11)),
         ),
         align="center",
         spacing="3",

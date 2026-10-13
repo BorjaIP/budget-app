@@ -1,6 +1,7 @@
 import reflex as rx
 
 from dashboard.components.page_header import page_header
+from dashboard.components.icon import icon
 from dashboard.expenses.state import TableState
 from dashboard.expenses.view import main_table
 from dashboard.templates import template
@@ -21,6 +22,49 @@ if (!window.__budgetSlashFocus) {
 """
 
 
+def _recategorize_dialog() -> rx.Component:
+    """Warns that a global run replaces the AI categories (hand-made ones are kept)."""
+    return rx.alert_dialog.root(
+        rx.alert_dialog.content(
+            rx.alert_dialog.title("Recategorizar con IA"),
+            rx.alert_dialog.description(
+                rx.vstack(
+                    rx.text(
+                        "Se volverán a categorizar ",
+                        rx.text.strong(TableState.recategorize_auto_count),
+                        " movimientos con el modelo local y sus categorías actuales se reemplazarán.",
+                        size="2",
+                    ),
+                    rx.text(
+                        "Los ",
+                        rx.text.strong(TableState.recategorize_manual_count),
+                        " que has categorizado a mano se conservan. Podrás deshacerlo después.",
+                        size="2",
+                    ),
+                    spacing="2",
+                    align="start",
+                ),
+            ),
+            rx.flex(
+                rx.alert_dialog.cancel(rx.button("Cancelar", variant="soft", color_scheme="gray")),
+                rx.alert_dialog.action(
+                    rx.button(
+                        "Recategorizar",
+                        color_scheme="violet",
+                        on_click=TableState.confirm_recategorize,
+                    ),
+                ),
+                spacing="3",
+                margin_top="1em",
+                justify="end",
+            ),
+            max_width="460px",
+        ),
+        open=TableState.show_recategorize_dialog,
+        on_open_change=TableState.set_show_recategorize_dialog,
+    )
+
+
 @template(route="/expenses", title="Gastos", on_load=TableState.load_entries_from_database)
 def expenses() -> rx.Component:
     return rx.vstack(
@@ -39,13 +83,15 @@ def expenses() -> rx.Component:
                     ),
                 ),
                 rx.button(
+                    icon("magic-wand", size=14),
                     "Recategorizar",
                     variant="soft",
-                    color_scheme="gray",
+                    color_scheme="violet",
                     size="2",
-                    on_click=TableState.force_recategorize,
+                    on_click=TableState.open_recategorize_dialog,
                     disabled=TableState.is_categorizing,
                 ),
+                _recategorize_dialog(),
                 spacing="3",
                 align="center",
             ),

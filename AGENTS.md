@@ -63,6 +63,29 @@ The Reflex app is configured in `rxconfig.py` with `app_name="dashboard"`. Entry
 - **LLM** (`llm/`): `llm_call.py` calls Ollama (default model `qwen2.5:3b-instruct`) at `settings.ollama_base_url` (env `OLLAMA_BASE_URL`, default `http://localhost:11434`). The prompt (`prompt.py`) asks for `[Category][Subcategory]`; few-shot examples come from rows the user tagged by hand (`category_source = "manual"`), falling back to static examples. `CATEGORY_TAXONOMY` is reviewed by the owner: **never change its categories or subcategories**.
 - **UI components** (`components/`), **templates** (`templates/template.py`), **styles** (`styles.py`, Radix UI theme).
 
+### Categorization pipeline
+
+`expenses/state.py::categorize_pending_expenses` is a background event (it keeps running when the user changes
+page; blocking database calls run in threads). Each movement goes through, cheapest first:
+
+1. **Merchant memory** (`MerchantLabel`, `llm/merchant.py::merchant_key`): a merchant the user already corrected
+   is reused with `category_source="memory"`. No model call, always the same answer. A manual correction is saved
+   with `DatabaseManager.learn_from_correction`, which also applies it to the merchant's non-manual rows.
+2. **Similarity** (`llm/retrieval.py`, character 3-gram TF-IDF cosine): a labeled movement at least 0.85 similar,
+   with no close rival of another category, is reused with `category_source="similar"`.
+3. **Model with retrieved examples**: the 8 most similar labeled merchants go in the prompt (plus the generic
+   examples while there are fewer than 20 labels), temperature 0. The answer stores `category_confidence` (joint
+   probability of the two bracketed tags, from Ollama `logprobs`).
+
+Rows without category, or from the model below `LLM_CONFIDENCE_THRESHOLD` (default 0.6, not calibrated), are the
+"Por revisar" queue. When a run ends, a global dialog (`components/categorization_results.py`) summarizes it and
+lists the doubtful merchants one by one (correct the badge, or "Está bien", which stores a hand-made label).
+A progress strip shows on every page while it runs. Manual rows are never overwritten.
+
+New columns on `expense` go through `DatabaseManager._ADDED_COLUMNS` (works on SQLite and PostgreSQL).
+`scripts/eval_similarity.py` measures similarity strategies on the owner's own labels (aggregates only).
+Background and references: `docs/categorization-strategy.md`.
+
 ### Logging
 
 The `dashboard` logger writes to stdout (`docker logs budget-app`). At `INFO` a categorization run logs only

@@ -1,4 +1,5 @@
 import logging
+import math
 import re
 import time
 from typing import Any
@@ -8,9 +9,12 @@ import httpx
 from dashboard.config import settings
 
 from .prompt import PROMPT, STATIC_EXAMPLES
+from .retrieval import SimilarityIndex, select_similar
 
 logger = logging.getLogger(__name__)
 
+# With at least this many labeled merchants the retrieved examples are enough on their own.
+RICH_CORPUS = 20
 DEFAULT_MODEL = "qwen2.5:3b-instruct"
 
 
@@ -120,7 +124,7 @@ def parse_category_response(raw: str) -> tuple[str, str]:
     return (cat, sub)
 
 
-def build_few_shot_examples(rows: list[dict[str, Any]], limit: int = 8) -> str:
+def build_few_shot_examples(rows: list[dict[str, Any]], limit: int = 8, diverse: bool = True) -> str:
     """Build the '{examples}' prompt block from manually-tagged expense rows.
 
     Each row must provide 'concept', 'category', 'subcategory' keys. Only
@@ -137,6 +141,15 @@ def build_few_shot_examples(rows: list[dict[str, Any]], limit: int = 8) -> str:
 
     if len(valid_rows) < 3:
         return STATIC_EXAMPLES
+
+    if not diverse:  # rows are already ranked by similarity: keep their order
+        selected = valid_rows[-limit:]
+        lines = ["Examples:"]
+        for row in selected:
+            lines.append(f"operation: {row['concept']}")
+            lines.append(f"→ [{row['category']}][{row['subcategory']}]")
+            lines.append("")
+        return "\n".join(lines).rstrip()
 
     seen_categories: set[str] = set()
     selected: list[dict[str, Any]] = []
@@ -164,14 +177,77 @@ def build_few_shot_examples(rows: list[dict[str, Any]], limit: int = 8) -> str:
     return "\n".join(lines).rstrip()
 
 
-def _get_dynamic_examples(limit: int = 8) -> str:
+def _get_dynamic_examples(
+    concept: str = "",
+    limit: int = 8,
+    labels: list[dict[str, Any]] | None = None,
+    index: SimilarityIndex | None = None,
+) -> str:
+    """Examples from what the user taught the app: the labels most similar to `concept`.
+
+    Callers categorizing many rows pass `labels` and a prebuilt `index` to avoid rebuilding them.
+    """
     try:
         from dashboard.database.operations import db_manager
 
+        if labels is None:
+            labels = db_manager.get_merchant_labels()
+        if len(labels) >= 3:
+            retrieved = build_few_shot_examples(select_similar(concept, labels, limit, index), limit, diverse=False)
+            if len(labels) >= RICH_CORPUS or retrieved == STATIC_EXAMPLES:
+                return retrieved
+            # Few labels: keep the generic examples too, with the retrieved ones closest to the question.
+            return STATIC_EXAMPLES + "\n\n" + retrieved.removeprefix("Examples:").lstrip()
         rows = db_manager.get_manually_tagged_examples(limit=limit)
     except Exception:
         return STATIC_EXAMPLES
     return build_few_shot_examples(rows, limit=limit)
+
+
+def bracket_confidence(tokens: list[dict] | None) -> float | None:
+    """Joint probability the model gave to the two `[Category][Subcategory]` tags it answered.
+
+    `tokens` is Ollama's `logprobs` list ({"token", "logprob"}); only tokens that open or sit
+    inside the first two bracket pairs count. None when the answer has no brackets.
+    """
+    if not tokens:
+        return None
+    depth, closed, total, seen = 0, 0, 0.0, False
+    for entry in tokens:
+        text, logprob = entry["token"], entry["logprob"]
+        if depth > 0 or "[" in text:
+            total += logprob
+            seen = True
+        for ch in text:
+            if ch == "[":
+                depth += 1
+            elif ch == "]" and depth > 0:
+                depth -= 1
+                closed += 1
+        if closed >= 2:
+            break
+    return math.exp(total) if seen else None
+
+
+async def query_llm_detailed(
+    prompt: str,
+    model: str = DEFAULT_MODEL,
+    timeout: float = 180.0,
+) -> dict:
+    """Answer plus token log-probabilities. Temperature 0 so the same input gives the same answer."""
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.post(
+            f"{_ollama_base_url()}/api/generate",
+            json={
+                "model": model,
+                "prompt": prompt,
+                "stream": False,
+                "logprobs": True,
+                "options": {"temperature": 0.0, "seed": 42, "num_predict": 48},
+            },
+        )
+        response.raise_for_status()
+        return response.json()
 
 
 async def query_llm(
@@ -179,24 +255,36 @@ async def query_llm(
     model: str = DEFAULT_MODEL,
     timeout: float = 180.0,
 ) -> str:
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        response = await client.post(
-            f"{_ollama_base_url()}/api/generate",
-            json={"model": model, "prompt": prompt, "stream": False},
+    return (await query_llm_detailed(prompt, model=model, timeout=timeout)).get("response", "")
+
+
+async def categorize_with_confidence(
+    concept: str,
+    model: str = DEFAULT_MODEL,
+    labels: list[dict[str, Any]] | None = None,
+    index: SimilarityIndex | None = None,
+) -> tuple[str, str, float | None]:
+    """(category, subcategory, confidence). Confidence is 0 when the answer fell back to Otros/General."""
+    examples = _get_dynamic_examples(concept, labels=labels, index=index)
+    formatted_prompt = PROMPT.format(examples=examples, variable=concept)
+    started = time.perf_counter()
+    answer = await query_llm_detailed(formatted_prompt, model=model)
+    raw = answer.get("response", "")
+    result = parse_category_response(raw)
+    confidence = bracket_confidence(answer.get("logprobs"))
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    # Concepts and model answers come from bank data: only logged at DEBUG.
+    logger.debug(
+        "categorized %r -> %s (raw %r, confidence %s, %.0f ms)", concept, result, raw[:120], confidence, elapsed_ms
+    )
+    if result == _FALLBACK:
+        logger.warning(
+            "Result is Otros/General: the answer did not match the taxonomy or the model chose it (%.0f ms)",
+            elapsed_ms,
         )
-        response.raise_for_status()
-        return response.json().get("response", "")
+    return result[0], result[1], confidence
 
 
 async def categorize_expense(concept: str, model: str = DEFAULT_MODEL) -> tuple[str, str]:
-    examples = _get_dynamic_examples()
-    formatted_prompt = PROMPT.format(examples=examples, variable=concept)
-    started = time.perf_counter()
-    raw = await query_llm(formatted_prompt, model=model)
-    result = parse_category_response(raw)
-    elapsed_ms = (time.perf_counter() - started) * 1000
-    # Concepts and model answers come from bank data: only logged at DEBUG.
-    logger.debug("categorized %r -> %s (raw %r, %.0f ms)", concept, result, raw[:120], elapsed_ms)
-    if result == _FALLBACK:
-        logger.warning("Result is Otros/General: the answer did not match the taxonomy or the model chose it (%.0f ms)", elapsed_ms)
-    return result
+    category, subcategory, _ = await categorize_with_confidence(concept, model=model)
+    return category, subcategory

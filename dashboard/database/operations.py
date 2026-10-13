@@ -1,13 +1,15 @@
 from collections import defaultdict
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import func, or_, text
+from sqlalchemy import func, inspect, or_, text
 from sqlmodel import Session, SQLModel, asc, create_engine, desc, select
 
 from dashboard.config import settings
+from dashboard.llm.merchant import merchant_key
 
-from .models import CategoryBudget, Expense, ExpenseCreate
+from .models import CategoryBudget, Expense, ExpenseCreate, MerchantLabel
 
 
 SORTABLE_COLUMNS = {
@@ -41,30 +43,22 @@ class DatabaseManager:
     def create_tables(self) -> None:
         SQLModel.metadata.create_all(self.engine)
 
+    # Columns added after the first release: name -> SQL type. `create_all` only creates missing
+    # tables, and this repo has no Alembic, so add them to existing tables here (SQLite and PostgreSQL).
+    _ADDED_COLUMNS = {"category_source": "TEXT", "category_confidence": "FLOAT"}
+
     def _migrate_schema(self) -> None:
-        """Guarded, additive migration for existing SQLite databases.
-
-        `SQLModel.metadata.create_all()` only creates missing tables; it does
-        not add new columns to a table that already exists. This repo has no
-        Alembic, so add any newly-introduced columns here defensively.
-        Only runs for SQLite — PostgreSQL uses create_all() for new tables and
-        relies on schema upgrades being handled out-of-band.
-        """
-        if not self.database_url.startswith("sqlite:///"):
-            return
-
+        """Guarded, additive migration: add the columns an older database does not have yet."""
         table_name = Expense.__tablename__
-        with self.engine.connect() as conn:
-            existing_columns = {
-                row[1] for row in conn.execute(text(f"PRAGMA table_info({table_name})")).fetchall()
-            }
-            if not existing_columns:
-                # Table doesn't exist yet (fresh DB) - create_tables() above
-                # already handles that case; nothing to migrate.
-                return
-            if "category_source" not in existing_columns:
-                conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN category_source TEXT"))
-                conn.commit()
+        existing = {col["name"] for col in inspect(self.engine).get_columns(table_name)}
+        if not existing:
+            return  # fresh database: create_all already built the full table
+        missing = {name: sql for name, sql in self._ADDED_COLUMNS.items() if name not in existing}
+        if not missing:
+            return
+        with self.engine.begin() as conn:
+            for name, sql in missing.items():
+                conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {name} {sql}"))
 
     def get_session(self) -> Session:
         return Session(self.engine)
@@ -121,6 +115,7 @@ class DatabaseManager:
         flow: str = "all",  # "all" | "income" | "expense"
         sort: str = "operation_date",
         sort_dir: str = "desc",
+        review_only: bool = False,
     ) -> tuple[list[Expense], int]:
         """Server-side filtering/sorting/pagination. Returns (rows, total_count)."""
         with self.get_session() as session:
@@ -150,6 +145,8 @@ class DatabaseManager:
                 filters.append(Expense.amount >= amount_min)
             if amount_max is not None:
                 filters.append(Expense.amount <= amount_max)
+            if review_only:
+                filters.append(self._needs_review_clause())
             if flow == "income":
                 filters.append(Expense.amount > 0)
             elif flow == "expense":
@@ -168,6 +165,27 @@ class DatabaseManager:
             total = session.exec(count_statement).one()
             return rows, int(total)
 
+    @staticmethod
+    def _needs_review_clause():
+        """Rows without a category, or categorized by the model with low confidence."""
+        return or_(
+            Expense.category.is_(None),  # type: ignore[union-attr]
+            (Expense.category_source == "llm")
+            & (Expense.category_confidence.is_not(None))  # type: ignore[union-attr]
+            & (Expense.category_confidence < settings.llm_confidence_threshold),
+        )
+
+    def get_expenses_by_ids(self, ids: list[int]) -> list[Expense]:
+        if not ids:
+            return []
+        with self.get_session() as session:
+            return list(session.exec(select(Expense).where(Expense.id.in_(ids))).all())  # type: ignore[attr-defined]
+
+    def count_to_review(self) -> int:
+        with self.get_session() as session:
+            statement = select(func.count()).select_from(Expense).where(self._needs_review_clause())
+            return int(session.exec(statement).one())
+
     def get_uncategorized_expenses(self, limit: int = 500) -> list[Expense]:
         with self.get_session() as session:
             statement = (
@@ -184,6 +202,7 @@ class DatabaseManager:
         category: str | None,
         subcategory: str | None = None,
         source: str = "manual",
+        confidence: float | None = None,
     ) -> bool:
         with self.get_session() as session:
             expense = session.get(Expense, expense_id)
@@ -193,6 +212,7 @@ class DatabaseManager:
             expense.subcategory = subcategory
             expense.is_categorized = True
             expense.category_source = source
+            expense.category_confidence = confidence
             session.add(expense)
             session.commit()
             return True
@@ -237,6 +257,116 @@ class DatabaseManager:
             session.add_all(rows)
             session.commit()
             return len(rows)
+
+    # ------------------------------------------------------------------
+    # Merchant memory: the per-user labeled corpus built from manual corrections
+    # ------------------------------------------------------------------
+    def get_merchant_labels(self) -> list[dict[str, Any]]:
+        with self.get_session() as session:
+            return [
+                {
+                    "merchant_key": m.merchant_key,
+                    "concept": m.sample_concept,
+                    "category": m.category,
+                    "subcategory": m.subcategory,
+                    "confirmations": m.confirmations,
+                }
+                for m in session.exec(select(MerchantLabel)).all()
+            ]
+
+    def get_merchant_label(self, key: str) -> dict[str, Any] | None:
+        if not key:
+            return None
+        with self.get_session() as session:
+            label = session.get(MerchantLabel, key)
+            if label is None:
+                return None
+            return {"category": label.category, "subcategory": label.subcategory}
+
+    def _remember_merchant(
+        self, session: Session, concept: str, category: str, subcategory: str | None
+    ) -> str:
+        key = merchant_key(concept)
+        if not key:
+            return ""
+        label = session.get(MerchantLabel, key)
+        if label is None:
+            session.add(
+                MerchantLabel(
+                    merchant_key=key,
+                    category=category,
+                    subcategory=subcategory,
+                    sample_concept=concept,
+                )
+            )
+        elif (label.category, label.subcategory) == (category, subcategory):
+            label.confirmations += 1
+            label.updated_at = datetime.now()
+            session.add(label)
+        else:  # the newest correction wins
+            label.category, label.subcategory = category, subcategory
+            label.sample_concept, label.confirmations = concept, 1
+            label.updated_at = datetime.now()
+            session.add(label)
+        return key
+
+    def learn_from_correction(self, expense_id: int) -> int:
+        """Remember a hand-made category for its merchant and apply it to the same merchant's
+        rows that were not tagged by hand. Returns how many other rows changed."""
+        with self.get_session() as session:
+            expense = session.get(Expense, expense_id)
+            if expense is None or not expense.category:
+                return 0
+            key = self._remember_merchant(session, expense.concept, expense.category, expense.subcategory)
+            session.commit()
+            if not key:
+                return 0
+            changed = 0
+            others = session.exec(
+                select(Expense).where(
+                    Expense.id != expense_id,
+                    or_(Expense.category_source.is_(None), Expense.category_source != "manual"),  # type: ignore[union-attr]
+                )
+            ).all()
+            for row in others:
+                if merchant_key(row.concept) != key:
+                    continue
+                row.category, row.subcategory = expense.category, expense.subcategory
+                row.is_categorized, row.category_source = True, "memory"
+                row.category_confidence = None
+                session.add(row)
+                changed += 1
+            session.commit()
+            return changed
+
+    def sync_merchant_memory(self) -> int:
+        """Backfill the memory from hand-made categories that predate it. Returns labels added."""
+        with self.get_session() as session:
+            known = set(session.exec(select(MerchantLabel.merchant_key)).all())
+            manual = session.exec(
+                select(Expense)
+                .where(Expense.category_source == "manual", Expense.category.is_not(None))  # type: ignore[union-attr]
+                .order_by(Expense.id)
+            ).all()
+            added = 0
+            for row in manual:
+                key = merchant_key(row.concept)
+                if not key or key in known:
+                    continue
+                self._remember_merchant(session, row.concept, row.category, row.subcategory)
+                known.add(key)
+                added += 1
+            session.commit()
+            return added
+
+    def count_by_source(self) -> dict[str, int]:
+        """Rows a global recategorization would replace ("auto") and rows it keeps ("manual")."""
+        with self.get_session() as session:
+            manual = session.exec(
+                select(func.count()).select_from(Expense).where(Expense.category_source == "manual")
+            ).one()
+            total = session.exec(select(func.count()).select_from(Expense)).one()
+        return {"auto": int(total) - int(manual), "manual": int(manual)}
 
     def snapshot_categorization(self) -> list[tuple]:
         """Current categorization of every row `reset_categorization` may overwrite."""

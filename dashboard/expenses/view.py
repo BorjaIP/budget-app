@@ -330,6 +330,13 @@ def _flow_filter() -> rx.Component:
     )
 
 
+def _review_chip() -> rx.Component:
+    return rx.cond(
+        TableState.review_only,
+        rx.badge("Por revisar", color_scheme="violet", variant="soft", size="2"),
+    )
+
+
 def _summary_line() -> rx.Component:
     return rx.text(
         "Mostrando ",
@@ -423,6 +430,7 @@ def _filters() -> rx.Component:
         ),
         rx.flex(
             _flow_filter(),
+            _review_chip(),
             rx.spacer(),
             _summary_line(),
             spacing="3",
@@ -535,24 +543,6 @@ def _bulk_bar() -> rx.Component:
             width="100%",
             custom_attrs={"role": "status"},
         ),
-    )
-
-
-def _categorization_progress() -> rx.Component:
-    return rx.cond(
-        TableState.is_categorizing,
-        rx.callout.root(
-            rx.callout.icon(rx.spinner(size="1")),
-            rx.callout.text(TableState.categorization_label),
-            rx.progress(
-                value=TableState.categorization_progress_pct,
-                max=100,
-                size="1",
-                margin_top="0.5em",
-            ),
-            color_scheme="gray",
-        ),
-        rx.fragment(),
     )
 
 
@@ -772,7 +762,6 @@ def main_table() -> rx.Component:
         _toolbar(),
         _filters(),
         _bulk_bar(),
-        _categorization_progress(),
         _upload_modal(),
         _table_or_empty(),
         rx.cond(TableState.total_items > 0, _pagination(), rx.fragment()),

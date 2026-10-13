@@ -29,11 +29,11 @@ def index() -> rx.Component:
             error_notice("No se pudieron cargar los datos.", StatsState.load_chart_data),
         ),
         rx.cond(
-            StatsState.uncategorized_count > 0,
+            StatsState.review_count > 0,
             rx.flex(
                 rx.hstack(
                     icon("info-circled", size=16),
-                    rx.text(StatsState.uncategorized_label, size="2"),
+                    rx.text(StatsState.review_label, size="2"),
                     spacing="2",
                     align="center",
                 ),
@@ -42,7 +42,7 @@ def index() -> rx.Component:
                     variant="soft",
                     color_scheme="gray",
                     size="2",
-                    on_click=StatsState.review_uncategorized,
+                    on_click=StatsState.review_pending,
                 ),
                 justify="between",
                 align="center",

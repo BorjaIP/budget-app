@@ -8,6 +8,7 @@ import reflex as rx
 
 from .. import styles
 from ..components.bottom_nav import bottom_nav
+from ..components.categorization_results import categorization_banner, results_dialog
 from ..components.navbar import navbar
 from ..components.sidebar import sidebar
 
@@ -60,10 +61,12 @@ def template(
                 rx.flex(
                     navbar(),
                     rx.vstack(
+                        categorization_banner(),
                         page_content(),
                         width="100%",
                         **styles.template_content_style,
                     ),
+                    results_dialog(),
                     bottom_nav(),
                     direction="column",
                     width="100%",

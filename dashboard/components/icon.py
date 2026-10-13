@@ -24,6 +24,7 @@ _TAGS = {
     "chevrons-right": "DoubleArrowRightIcon",
     "sun": "SunIcon",
     "moon": "MoonIcon",
+    "magic-wand": "MagicWandIcon",
     "pie-chart": "PieChartIcon",
     "info-circled": "InfoCircledIcon",
 }

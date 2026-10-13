@@ -45,7 +45,7 @@ class StatsState(rx.State):
     period: str = DEFAULT_PRESET
     prev_income: float | None = None
     prev_spending: float | None = None
-    uncategorized_count: int = 0
+    review_count: int = 0
     latest_date: str = ""
     daily_mode: bool = False
     unusual: list[UnusualRow] = []
@@ -122,7 +122,7 @@ class StatsState(rx.State):
                 self.prev_spending = previous["spending"]
             else:
                 self.prev_income = self.prev_spending = None
-            self.uncategorized_count = db_manager.count_uncategorized()
+            self.review_count = db_manager.count_to_review()
             self.unusual = find_unusual(expenses, max_date)
 
             breakdown = db_manager.get_category_breakdown(date_from=date_from, date_to=date_to)
@@ -233,9 +233,10 @@ class StatsState(rx.State):
         return _delta_label(self.total_spending, self.prev_spending)
 
     @rx.var(cache=True)
-    def uncategorized_label(self) -> str:
-        n = self.uncategorized_count
-        return f"{n} movimiento sin categorizar" if n == 1 else f"{n} movimientos sin categorizar"
+    def review_label(self) -> str:
+        n = self.review_count
+        noun = "movimiento" if n == 1 else "movimientos"
+        return f"{n} {noun} por revisar (sin categoría o con poca confianza del modelo)"
 
     @rx.event
     async def set_period(self, value: str | list[str]):
@@ -264,9 +265,9 @@ class StatsState(rx.State):
         ]
 
     @rx.event
-    def review_uncategorized(self):
+    def review_pending(self):
         return [
-            TableState.drill_down("Sin categorizar", "", "", "all"),
+            TableState.drill_down_review,
             rx.redirect("/expenses"),
         ]
 

@@ -65,3 +65,22 @@ def test_categorization_snapshot_restores_what_a_reset_changed(tmp_path, monkeyp
     assert (rows[ids[0]].category, rows[ids[0]].subcategory, rows[ids[0]].is_categorized) == ("Ocio", "Libros", True)
     assert rows[ids[1]].category == "Salud" and rows[ids[1]].category_source == "manual"
     assert len(snapshot) == 1
+
+
+def test_count_by_source_splits_replaceable_and_manual_rows(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    from dashboard.database.models import ExpenseCreate
+    from dashboard.database.operations import DatabaseManager
+
+    manager = DatabaseManager(database_url=f"sqlite:///{tmp_path}/expenses.db")
+    manager.bulk_insert_with_dedupe(
+        [
+            ExpenseCreate(operation_date="2026-01-0%d" % i, value_date="2026-01-0%d" % i, concept=f"C{i}", amount=-1.0, balance=0.0, dedupe_hash=f"h{i}")
+            for i in range(1, 4)
+        ]
+    )
+    ids = [e.id for e in manager.get_all_expenses()]
+    manager.update_category(ids[0], "Ocio", "Libros", source="manual")
+    manager.update_category(ids[1], "Salud", None, source="llm")
+
+    assert manager.count_by_source() == {"auto": 2, "manual": 1}

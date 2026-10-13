@@ -1,11 +1,13 @@
 from collections import defaultdict
+import logging
 from datetime import datetime
 
 import pydantic
 import reflex as rx
-from reflex.components.radix.themes.base import LiteralAccentColor
 
 from dashboard.database.operations import db_manager
+
+logger = logging.getLogger(__name__)
 
 _MONTH_NAMES_ES = [
     "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
@@ -51,6 +53,7 @@ class StatsState(rx.State):
     top_concepts: list[ConceptRow] = []
     recent_expenses: list[RecentRow] = []
     is_loading: bool = False
+    load_error: bool = False
 
     @rx.var(cache=True)
     def year_options(self) -> list[str]:
@@ -73,6 +76,7 @@ class StatsState(rx.State):
     @rx.event
     async def load_chart_data(self):
         self.is_loading = True
+        self.load_error = False
         try:
             self.available_years = db_manager.get_available_years()
             min_date, max_date = db_manager.get_date_bounds()
@@ -117,15 +121,18 @@ class StatsState(rx.State):
                 for b in all_buckets
             ]
 
+            breakdown = db_manager.get_category_breakdown(date_from=date_from, date_to=date_to)
+            breakdown_total = sum(row["value"] for row in breakdown) or 1.0
+            breakdown_peak = max((row["value"] for row in breakdown), default=0.0) or 1.0
             self.category_breakdown = [
                 {
                     "name": row["name"],
                     "value": row["value"],
                     "value_fmt": _format_currency(row["value"]),
+                    "percent_fmt": f"{row['value'] / breakdown_total * 100:.1f} %".replace(".", ","),
+                    "bar": f"{row['value'] / breakdown_peak * 100:.1f}%",
                 }
-                for row in db_manager.get_category_breakdown(
-                    date_from=date_from, date_to=date_to
-                )
+                for row in breakdown
             ]
             self.top_concepts = [
                 ConceptRow(
@@ -150,8 +157,9 @@ class StatsState(rx.State):
                 )
                 for e in db_manager.get_recent_expenses(limit=8)
             ]
-        except Exception as exc:
-            print(f"Error loading chart data: {exc}")
+        except Exception:
+            logger.exception("Could not load the dashboard data")
+            self.load_error = True
             self.chart_data = []
             self.category_breakdown = []
             self.top_concepts = []
@@ -184,20 +192,9 @@ class StatsState(rx.State):
     @rx.var(cache=True)
     def savings_rate_fmt(self) -> str:
         if self.total_ingresos <= 0:
-            return "—"
+            return "-"
         rate = (self.total_ingresos - self.total_gastos) / self.total_ingresos * 100
-        return f"{rate:.1f}%"
-
-    @rx.var(cache=True)
-    def savings_rate_color(self) -> str:
-        if self.total_ingresos <= 0:
-            return "gray"
-        rate = (self.total_ingresos - self.total_gastos) / self.total_ingresos * 100
-        if rate >= 20:
-            return "green"
-        if rate > 0:
-            return "amber"
-        return "red"
+        return f"{rate:.1f} %".replace(".", ",")
 
     @rx.event
     async def set_selected_year(self, value: str | list[str]):
@@ -230,97 +227,112 @@ def _humanize_month(bucket: str) -> str:
 def _format_range_label(min_date: str | None, max_date: str | None) -> str:
     if not min_date or not max_date:
         return "Sin datos cargados todavía"
-    return f"Datos disponibles: {_humanize(min_date)} – {_humanize(max_date)}"
+    return f"Datos disponibles: {_humanize(min_date)} a {_humanize(max_date)}"
 
 
 _Y_TICK_FORMATTER = (
     "(value) => {"
-    "  if (Math.abs(value) >= 1000000) return (value / 1000000).toFixed(1) + 'M €';"
-    "  if (Math.abs(value) >= 1000) return (value / 1000).toFixed(1) + 'K €';"
+    "  const fmt = (n) => n.toFixed(1).replace('.', ',').replace(',0', '');"
+    "  const abs = Math.abs(value);"
+    "  if (abs >= 1000000) return fmt(value / 1000000) + ' M €';"
+    "  if (abs >= 1000) return fmt(value / 1000) + ' k €';"
     "  return value + ' €';"
     "}"
 )
 
+_CHART_HEIGHT = 280
 
-def _create_gradient(color: LiteralAccentColor, gradient_id: str):
-    return rx.el.svg.defs(
-        rx.el.svg.linear_gradient(
-            rx.el.svg.stop(stop_color=rx.color(color, 7), offset="5%", stop_opacity=0.8),
-            rx.el.svg.stop(stop_color=rx.color(color, 7), offset="95%", stop_opacity=0),
-            x1=0, x2=0, y1=0, y2=1,
-            id=gradient_id,
-        ),
+
+def _custom_tooltip():
+    return rx.recharts.graphing_tooltip(
+        separator=": ",
+        content_style={
+            "backgroundColor": "var(--color-panel-solid)",
+            "borderRadius": "var(--radius-3)",
+            "border": "1px solid var(--gray-a6)",
+            "padding": "0.5rem 0.75rem",
+            "boxShadow": "none",
+            "fontSize": "12px",
+        },
+        is_animation_active=False,
     )
 
 
-def _custom_tooltip(color: LiteralAccentColor):
-    return rx.recharts.graphing_tooltip(
-        separator=" : ",
-        content_style={
-            "backgroundColor": rx.color("gray", 1),
-            "borderRadius": "var(--radius-2)",
-            "borderWidth": "1px",
-            "borderColor": rx.color(color, 7),
-            "padding": "0.5rem",
-            "boxShadow": "0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)",
-        },
-        is_animation_active=True,
+def _x_axis(data_key: str = "date"):
+    return rx.recharts.x_axis(
+        data_key=data_key,
+        tick_line=False,
+        axis_line=False,
+        interval="preserveStartEnd",
+        min_tick_gap=40,
+        tick_margin=8,
+    )
+
+
+def _y_axis():
+    return rx.recharts.y_axis(
+        tick_formatter=_Y_TICK_FORMATTER,
+        width=64,
+        tick_line=False,
+        axis_line=False,
     )
 
 
 def _empty_chart_placeholder() -> rx.Component:
     return rx.center(
-        rx.vstack(
-            rx.icon("chart-no-axes-combined", size=32, color="gray"),
-            rx.text("No hay datos para el periodo seleccionado", size="3", weight="medium"),
-            spacing="3",
-            align="center",
+        rx.text(
+            "No hay datos para el periodo seleccionado",
+            size="2",
+            color=rx.color("gray", 11),
         ),
-        height="300px",
+        height="200px",
     )
 
 
 def _loading_placeholder() -> rx.Component:
-    return rx.center(
-        rx.vstack(
-            rx.spinner(size="3"),
-            rx.text("Cargando datos...", size="2", color="gray"),
-            spacing="3",
-            align="center",
-        ),
-        height="300px",
+    return rx.skeleton(height=f"{_CHART_HEIGHT}px", width="100%")
+
+
+def _labeled(label: str, control: rx.Component) -> rx.Component:
+    return rx.vstack(
+        rx.text(label, size="1", color=rx.color("gray", 11)),
+        control,
+        spacing="1",
+        align="start",
     )
 
 
 def date_filter_controls() -> rx.Component:
     return rx.vstack(
         rx.hstack(
-            rx.select(
-                StatsState.year_options,
-                value=StatsState.selected_year,
-                on_change=StatsState.set_selected_year,
-                size="2",
-            ),
-            rx.cond(
-                StatsState.selected_year != "Todo",
+            _labeled(
+                "Año",
                 rx.select(
-                    StatsState.month_options,
-                    value=StatsState.selected_month,
-                    on_change=StatsState.set_selected_month,
+                    StatsState.year_options,
+                    value=StatsState.selected_year,
+                    on_change=StatsState.set_selected_year,
                     size="2",
                 ),
             ),
+            rx.cond(
+                StatsState.selected_year != "Todo",
+                _labeled(
+                    "Mes",
+                    rx.select(
+                        StatsState.month_options,
+                        value=StatsState.selected_month,
+                        on_change=StatsState.set_selected_month,
+                        size="2",
+                    ),
+                ),
+            ),
             spacing="3",
-            align="center",
+            align="end",
             wrap="wrap",
         ),
-        rx.text(
-            StatsState.data_range_label,
-            size="1",
-            color=rx.color("gray", 10),
-        ),
-        spacing="1",
-        align="end",
+        rx.text(StatsState.data_range_label, size="1", color=rx.color("gray", 11)),
+        spacing="2",
+        align=rx.breakpoints(initial="start", md="end"),
     )
 
 
@@ -332,23 +344,16 @@ def ingresos_gastos_chart() -> rx.Component:
             StatsState.chart_data.length() == 0,
             _empty_chart_placeholder(),
             rx.recharts.bar_chart(
-                _custom_tooltip("teal"),
-                rx.recharts.cartesian_grid(stroke_dasharray="3 3"),
-                rx.recharts.bar(
-                    name="Ingresos",
-                    data_key="ingresos",
-                    fill=rx.color("green", 9),
-                ),
-                rx.recharts.bar(
-                    name="Gastos",
-                    data_key="gastos",
-                    fill=rx.color("red", 9),
-                ),
-                rx.recharts.x_axis(data_key="date", scale="auto"),
-                rx.recharts.y_axis(tick_formatter=_Y_TICK_FORMATTER),
-                rx.recharts.legend(),
+                _custom_tooltip(),
+                rx.recharts.cartesian_grid(horizontal=True, vertical=False),
+                rx.recharts.bar(name="Ingresos", data_key="ingresos", fill=rx.color("gray", 12)),
+                rx.recharts.bar(name="Gastos", data_key="gastos", fill=rx.color("gray", 8)),
+                _x_axis(),
+                _y_axis(),
+                rx.recharts.legend(icon_type="circle", icon_size=8),
                 data=StatsState.chart_data,
-                height=300,
+                height=_CHART_HEIGHT,
+                bar_gap=2,
             ),
         ),
     )
@@ -362,21 +367,22 @@ def saldo_chart() -> rx.Component:
             StatsState.chart_data.length() == 0,
             _empty_chart_placeholder(),
             rx.recharts.area_chart(
-                _create_gradient("blue", "colorBlue"),
-                _custom_tooltip("blue"),
-                rx.recharts.cartesian_grid(stroke_dasharray="3 3"),
+                _custom_tooltip(),
+                rx.recharts.cartesian_grid(horizontal=True, vertical=False),
                 rx.recharts.area(
                     name="Saldo",
                     data_key="saldo",
-                    stroke=rx.color("blue", 9),
-                    fill="url(#colorBlue)",
+                    stroke=rx.color("gray", 12),
+                    stroke_width=1.5,
+                    fill=rx.color("gray", 4, True),
                     type_="monotone",
+                    dot=False,
                 ),
-                rx.recharts.x_axis(data_key="date", scale="auto"),
-                rx.recharts.y_axis(tick_formatter=_Y_TICK_FORMATTER),
-                rx.recharts.legend(),
+                _x_axis(),
+                _y_axis(),
+                rx.recharts.legend(icon_type="circle", icon_size=8),
                 data=StatsState.chart_data,
-                height=300,
+                height=_CHART_HEIGHT,
             ),
         ),
     )

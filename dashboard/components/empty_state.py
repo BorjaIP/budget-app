@@ -11,11 +11,11 @@ def empty_state(
     on_action=None,
 ) -> rx.Component:
     body = [
-        rx.icon(icon, size=48, color=rx.color("gray", 8)),
-        rx.heading(title, size="5", weight="medium"),
+        rx.icon(icon, size=20, color=rx.color("gray", 9)),
+        rx.heading(title, as_="h2", size="4", weight="medium"),
         rx.text(
             description,
-            size="3",
+            size="2",
             color=rx.color("gray", 11),
             text_align="center",
             max_width="32em",
@@ -24,18 +24,19 @@ def empty_state(
     if action_label and on_action is not None:
         body.append(
             rx.button(
-                rx.icon("upload", size=18),
                 action_label,
-                size="3",
+                size="2",
+                color_scheme="gray",
+                high_contrast=True,
                 on_click=on_action,
                 margin_top="0.5em",
             )
         )
 
     return rx.center(
-        rx.vstack(*body, spacing="3", align="center"),
-        padding="4em 1em",
-        border=f"1px dashed {rx.color('gray', 6)}",
-        border_radius=styles.border_radius,
+        rx.vstack(*body, spacing="2", align="center"),
+        padding="4rem 1rem",
+        border=f"1px dashed {rx.color('gray', 6, True)}",
+        border_radius="var(--radius-4)",
         width="100%",
     )

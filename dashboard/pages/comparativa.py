@@ -2,7 +2,9 @@
 
 import reflex as rx
 
-from .. import styles
+from ..components.card import card
+from ..components.notice import error_notice
+from ..components.page_header import page_header
 from ..templates import template
 from ..views.yearly_compare import (
     YearlyCompareState,
@@ -11,36 +13,22 @@ from ..views.yearly_compare import (
 )
 
 
-def _card(*children, title: str | None = None, icon: str | None = None) -> rx.Component:
-    header = rx.fragment()
-    if title:
-        header = rx.hstack(
-            rx.icon(icon or "circle-dot", size=18, color=rx.color("teal", 9)),
-            rx.text(title, size="3", weight="medium"),
-            align="center",
-            spacing="2",
-            margin_bottom="0.75em",
-        )
-    return rx.card(
-        header,
-        *children,
-        size="3",
-        width="100%",
-        box_shadow=styles.box_shadow_style,
-    )
-
-
 @template(route="/comparativa", title="Comparativa", on_load=YearlyCompareState.load_yearly_summary)
 def comparativa() -> rx.Component:
     return rx.vstack(
-        rx.heading("Comparativa anual", size="6"),
-        rx.text(
+        page_header(
+            "Comparativa anual",
             "Ingresos, gastos y ahorro totales de cada año cargado.",
-            size="2",
-            color=rx.color("gray", 10),
         ),
-        _card(yearly_compare_chart(), title="Ingresos vs gastos vs ahorro por año", icon="bar-chart-3"),
-        _card(yearly_compare_table(), title="Detalle por año", icon="table"),
+        rx.cond(
+            YearlyCompareState.load_error,
+            error_notice(
+                "No se pudo cargar la comparativa.",
+                YearlyCompareState.load_yearly_summary,
+            ),
+        ),
+        card(yearly_compare_chart(), title="Ingresos vs gastos vs ahorro por año"),
+        card(yearly_compare_table(), title="Detalle por año"),
         spacing="6",
         width="100%",
     )

@@ -1,74 +1,49 @@
 import reflex as rx
-from reflex.components.radix.themes.base import LiteralAccentColor
 
-from .. import styles
 from ..views.charts import StatsState
 
 
-def budget_stat_card(
-    stat_name: str,
-    value_var,
-    icon: str,
-    icon_color: LiteralAccentColor | rx.Var,
-) -> rx.Component:
-    return rx.card(
-        rx.hstack(
-            rx.badge(
-                rx.icon(tag=icon, size=28),
-                color_scheme=icon_color,
-                radius="full",
-                padding="0.7rem",
+def _stat(label: str, value_var) -> rx.Component:
+    return rx.vstack(
+        rx.text(label, size="2", color=rx.color("gray", 11)),
+        rx.skeleton(
+            rx.heading(
+                value_var,
+                as_="p",
+                size=rx.breakpoints(initial="4", sm="5", lg="6"),
+                weight="medium",
+                letter_spacing="-0.02em",
+                class_name="num",
             ),
-            rx.vstack(
-                rx.heading(value_var, size="6", weight="bold"),
-                rx.text(stat_name, size="3", weight="medium", color=rx.color("gray", 11)),
-                spacing="1",
-                align_items="start",
-                width="100%",
-            ),
-            spacing="4",
-            align="center",
-            width="100%",
+            loading=StatsState.is_loading,
+            min_width="6em",
         ),
-        size="3",
+        spacing="1",
+        align="start",
         width="100%",
-        box_shadow=styles.box_shadow_style,
+        padding=["1rem", "1rem", "1.25rem", "1.5rem", "1.5rem"],
+        background="var(--color-panel-solid)",
     )
 
 
 def budget_stats_cards() -> rx.Component:
+    """One bordered strip; the 1px gaps show the container color as dividers."""
     return rx.grid(
-        budget_stat_card(
-            "Ingresos",
-            StatsState.total_ingresos_fmt,
-            "trending-up",
-            "green",
-        ),
-        budget_stat_card(
-            "Gastos",
-            StatsState.total_gastos_fmt,
-            "trending-down",
-            "red",
-        ),
-        budget_stat_card(
-            "Saldo",
-            StatsState.saldo_neto_fmt,
-            "wallet",
-            "teal",
-        ),
-        budget_stat_card(
-            "Tasa de ahorro",
-            StatsState.savings_rate_fmt,
-            "piggy-bank",
-            StatsState.savings_rate_color,
-        ),
-        gap="1rem",
+        _stat("Ingresos", StatsState.total_ingresos_fmt),
+        _stat("Gastos", StatsState.total_gastos_fmt),
+        _stat("Saldo", StatsState.saldo_neto_fmt),
+        _stat("Tasa de ahorro", StatsState.savings_rate_fmt),
+        gap="1px",
         grid_template_columns=[
-            "1fr",
+            "repeat(2, 1fr)",
             "repeat(2, 1fr)",
             "repeat(2, 1fr)",
             "repeat(4, 1fr)",
             "repeat(4, 1fr)",
         ],
         width="100%",
+        overflow="hidden",
+        border=f"1px solid {rx.color('gray', 5, True)}",
+        border_radius="var(--radius-4)",
+        background=rx.color("gray", 5, True),
     )

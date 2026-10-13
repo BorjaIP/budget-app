@@ -57,6 +57,21 @@ body {
     font-size: 12px;
 }
 
+/* Recharts lists legend items in reverse series order; flip them back. */
+.recharts-default-legend {
+    display: flex;
+    flex-direction: row-reverse;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 0 1rem;
+    margin: 0;
+    padding: 0;
+}
+
+.recharts-default-legend .recharts-legend-item {
+    margin-right: 0 !important;
+}
+
 .rt-BaseTabList {
     box-shadow: none;
 }

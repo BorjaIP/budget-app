@@ -1,5 +1,6 @@
 import reflex as rx
 
+from dashboard.components.page_header import page_header
 from dashboard.expenses.state import TableState
 from dashboard.expenses.view import main_table
 from dashboard.templates import template
@@ -8,21 +9,17 @@ from dashboard.templates import template
 @template(route="/expenses", title="Gastos", on_load=TableState.load_entries_from_database)
 def expenses() -> rx.Component:
     return rx.vstack(
-        rx.hstack(
-            rx.heading("Gastos", size="6"),
-            rx.spacer(),
-            rx.button(
-                rx.icon("sparkles", size=16),
+        page_header(
+            "Gastos",
+            actions=rx.button(
                 "Recategorizar",
-                variant="surface",
+                variant="soft",
+                color_scheme="gray",
                 size="2",
                 on_click=TableState.force_recategorize,
             ),
-            align="center",
-            wrap="wrap",
-            width="100%",
         ),
         main_table(),
-        spacing="4",
+        spacing="5",
         width="100%",
     )

@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import List
@@ -7,6 +8,8 @@ import reflex as rx
 from dashboard.database.operations import db_manager
 from dashboard.expenses.model import Item
 from dashboard.utils.file_processor import file_processor
+
+logger = logging.getLogger(__name__)
 
 
 def _format_currency(value: float) -> str:
@@ -56,6 +59,7 @@ class TableState(rx.State):
     limit: int = 12
 
     upload_status: str = ""
+    upload_error: bool = False
     is_uploading: bool = False
     show_upload_modal: bool = False
     pending_bank_name: str = ""
@@ -181,10 +185,11 @@ class TableState(rx.State):
             ]
             if self.offset >= max(self.total_items, 1):
                 self.offset = 0
-        except Exception as exc:
+        except Exception:
+            logger.exception("Could not load the expenses")
             self.items = []
             self.total_items = 0
-            return rx.toast.error(f"Error cargando movimientos: {exc}")
+            return rx.toast.error("No se pudieron cargar los movimientos")
         finally:
             self.is_loading = False
 
@@ -300,16 +305,20 @@ class TableState(rx.State):
     async def handle_upload(self, files: list[rx.UploadFile]):
         if not files:
             self.upload_status = "Sin archivo seleccionado"
+            self.upload_error = True
             return
         self.is_uploading = True
+        self.upload_error = False
         self.upload_status = "Procesando archivo..."
         try:
             for file in files:
                 if not file.filename:
-                    self.upload_status = "❌ Archivo inválido"
+                    self.upload_status = "Archivo inválido"
+                    self.upload_error = True
                     continue
                 if not file.filename.lower().endswith((".xls", ".xlsx")):
-                    self.upload_status = "❌ Sólo se aceptan archivos .xls o .xlsx"
+                    self.upload_status = "Sólo se aceptan archivos .xls o .xlsx"
+                    self.upload_error = True
                     continue
 
                 upload_data = await file.read()
@@ -321,7 +330,8 @@ class TableState(rx.State):
                 result = file_processor.process_excel_file(str(outfile), bank_name=bank)
 
                 if result["status"] == "success":
-                    self.upload_status = f"✅ {result['message']}"
+                    self.upload_status = result["message"]
+                    self.upload_error = False
                     self.show_upload_modal = False
                     self.pending_bank_name = ""
                     self.offset = 0
@@ -333,11 +343,14 @@ class TableState(rx.State):
                     yield rx.toast.success(result["message"])
                     yield TableState.categorize_pending_expenses
                 else:
-                    self.upload_status = f"❌ {result['message']}"
+                    self.upload_status = result["message"]
+                    self.upload_error = True
                     yield rx.toast.error(result["message"])
-        except Exception as exc:
-            self.upload_status = f"❌ Error: {exc}"
-            yield rx.toast.error(str(exc))
+        except Exception:
+            logger.exception("Could not process the uploaded file")
+            self.upload_status = "No se pudo procesar el archivo. Comprueba que sea un extracto válido."
+            self.upload_error = True
+            yield rx.toast.error("No se pudo procesar el archivo")
         finally:
             self.is_uploading = False
 
@@ -359,12 +372,12 @@ class TableState(rx.State):
         for index, expense in enumerate(pending):
             try:
                 category, subcategory = await categorize_expense(expense.concept)
-            except Exception as exc:
+            except Exception:
+                logger.exception("The local model is not available")
                 async with self:
                     self.is_categorizing = False
                 yield rx.toast.warning(
-                    f"Ollama no disponible ({exc.__class__.__name__}); las filas restantes "
-                    "quedan sin categorizar."
+                    "El modelo local no está disponible. Las filas restantes quedan sin categorizar."
                 )
                 return
 
@@ -390,6 +403,7 @@ class TableState(rx.State):
 
     def open_upload_modal(self):
         self.upload_status = ""
+        self.upload_error = False
         self.pending_bank_name = ""
         self.show_upload_modal = True
         return rx.clear_selected_files("upload-excel")

@@ -40,25 +40,22 @@ def category_badge(item: Item) -> rx.Component:
         item.category,
         rx.cond(TableState.is_categorizing, "Categorizando…", "Sin categorizar"),
     )
-    icon = rx.cond(
+    spinner = rx.cond(
         item.category,
-        rx.icon("tag", size=12),
-        rx.cond(
-            TableState.is_categorizing,
-            rx.spinner(size="1"),
-            rx.icon("tag", size=12),
-        ),
+        rx.fragment(),
+        rx.cond(TableState.is_categorizing, rx.spinner(size="1"), rx.fragment()),
     )
 
     trigger = rx.badge(
-        icon,
+        spinner,
         label,
         color_scheme=color,
         variant="soft",
-        size="2",
-        radius="full",
+        size="1",
+        radius="medium",
         cursor="pointer",
         style={"_hover": {"opacity": 0.85}},
+        custom_attrs={"title": "Cambiar categoría"},
     )
 
     return rx.popover.root(
@@ -79,7 +76,6 @@ def _category_picker(item: Item) -> rx.Component:
             rx.vstack(
                 *[
                     rx.button(
-                        rx.icon("tag", size=14),
                         category,
                         variant=rx.cond(item.category == category, "solid", "soft"),
                         color_scheme=CATEGORY_COLORS[category],

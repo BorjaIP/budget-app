@@ -10,13 +10,14 @@ def _item(href: str, label: str, glyph: str) -> rx.Component:
     return rx.link(
         rx.vstack(
             icon(glyph, size=20),
-            rx.text(label, size="1"),
+            rx.text(label, size="1", style={"font_size": "0.6875rem", "white_space": "nowrap"}),
             spacing="1",
             align="center",
         ),
         href=href,
         underline="none",
         flex="1",
+        min_width="0",
         padding_y="0.5em",
         text_align="center",
         color=rx.cond(active, rx.color("gray", 12), rx.color("gray", 11)),

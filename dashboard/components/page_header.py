@@ -5,13 +5,13 @@ import reflex as rx
 
 def page_header(
     title: str,
-    description: str | None = None,
+    description: "str | rx.Var | None" = None,
     actions: rx.Component | None = None,
 ) -> rx.Component:
     text = [
         rx.heading(title, as_="h1", size="6", weight="medium", letter_spacing="-0.02em"),
     ]
-    if description:
+    if description is not None:
         text.append(rx.text(description, size="2", color=rx.color("gray", 11)))
     return rx.flex(
         rx.vstack(*text, spacing="1", align="start"),

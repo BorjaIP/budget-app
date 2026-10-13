@@ -14,7 +14,7 @@ from pathlib import Path
 
 from sqlmodel import Session, SQLModel, create_engine
 
-from dashboard.database.models import Expense
+from dashboard.database.models import CategoryBudget, Expense
 from dashboard.llm.llm_call import CATEGORY_TAXONOMY
 
 # (category, subcategory, concepts, typical amount range, monthly occurrences)
@@ -102,6 +102,10 @@ def main() -> None:
     rows = build_rows(random.Random(20261010))
     with Session(engine) as session:
         session.add_all(rows)
+        session.add_all(
+            CategoryBudget(category=name, monthly_limit=limit)
+            for name, limit in {"Vivienda": 800.0, "Gastos diarios": 350.0, "Ocio": 60.0, "Transporte": 200.0}.items()
+        )
         session.commit()
     print(f"seeded {len(rows)} synthetic expenses into {target}")
 

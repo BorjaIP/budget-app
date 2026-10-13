@@ -35,3 +35,10 @@ class ExpenseRead(ExpenseBase):
     dedupe_hash: str
     created_at: datetime
     file_source: Optional[str] = None
+
+
+class CategoryBudget(SQLModel, table=True):
+    """Monthly spending limit for one category (names come from CATEGORY_TAXONOMY)."""
+
+    category: str = Field(primary_key=True)
+    monthly_limit: float = Field(description="Monthly limit in euros; always positive")

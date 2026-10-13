@@ -7,7 +7,7 @@ from sqlmodel import Session, SQLModel, asc, create_engine, desc, select
 
 from dashboard.config import settings
 
-from .models import Expense, ExpenseCreate
+from .models import CategoryBudget, Expense, ExpenseCreate
 
 
 SORTABLE_COLUMNS = {
@@ -380,6 +380,24 @@ class DatabaseManager:
             "ingresos": round(sum(a for a in amounts if a > 0), 2),
             "gastos": round(sum(-a for a in amounts if a < 0), 2),
         }
+
+    def get_budgets(self) -> dict[str, float]:
+        with self.get_session() as session:
+            return {b.category: b.monthly_limit for b in session.exec(select(CategoryBudget)).all()}
+
+    def set_budget(self, category: str, monthly_limit: float | None) -> None:
+        """Store the monthly limit of a category; a missing or non-positive limit removes it."""
+        with self.get_session() as session:
+            budget = session.get(CategoryBudget, category)
+            if monthly_limit is None or monthly_limit <= 0:
+                if budget is not None:
+                    session.delete(budget)
+            elif budget is None:
+                session.add(CategoryBudget(category=category, monthly_limit=monthly_limit))
+            else:
+                budget.monthly_limit = monthly_limit
+                session.add(budget)
+            session.commit()
 
     def count_uncategorized(self) -> int:
         with self.get_session() as session:

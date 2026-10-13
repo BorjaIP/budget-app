@@ -98,6 +98,9 @@ class TableState(rx.State):
     categorization_progress: int = 0
     categorization_total: int = 0
     can_undo_recategorize: bool = False
+    show_recategorize_dialog: bool = False
+    recategorize_auto_count: int = 0
+    recategorize_manual_count: int = 0
     selected_ids: list[int] = []
 
     selected_categories: list[str] = []
@@ -537,6 +540,20 @@ class TableState(rx.State):
         restored = db_manager.restore_categorization(snapshot)
         self.load_entries_from_database()
         return rx.toast.success(f"Categorías anteriores restauradas en {restored} movimientos")
+
+    def open_recategorize_dialog(self):
+        counts = db_manager.count_by_source()
+        self.recategorize_auto_count = counts["auto"]
+        self.recategorize_manual_count = counts["manual"]
+        self.show_recategorize_dialog = True
+
+    @rx.event
+    def set_show_recategorize_dialog(self, value: bool):
+        self.show_recategorize_dialog = value
+
+    def confirm_recategorize(self):
+        self.show_recategorize_dialog = False
+        return TableState.force_recategorize
 
     def force_recategorize(self):
         _UNDO_SNAPSHOTS[self.router.session.client_token] = db_manager.snapshot_categorization()

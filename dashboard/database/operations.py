@@ -238,6 +238,15 @@ class DatabaseManager:
             session.commit()
             return len(rows)
 
+    def count_by_source(self) -> dict[str, int]:
+        """Rows a global recategorization would replace ("auto") and rows it keeps ("manual")."""
+        with self.get_session() as session:
+            manual = session.exec(
+                select(func.count()).select_from(Expense).where(Expense.category_source == "manual")
+            ).one()
+            total = session.exec(select(func.count()).select_from(Expense)).one()
+        return {"auto": int(total) - int(manual), "manual": int(manual)}
+
     def snapshot_categorization(self) -> list[tuple]:
         """Current categorization of every row `reset_categorization` may overwrite."""
         with self.get_session() as session:

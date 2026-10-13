@@ -5,6 +5,8 @@ from typing import Any
 from sqlalchemy import func, or_, text
 from sqlmodel import Session, SQLModel, asc, create_engine, desc, select
 
+from dashboard.config import settings
+
 from .models import Expense, ExpenseCreate
 
 
@@ -19,12 +21,22 @@ SORTABLE_COLUMNS = {
 
 
 class DatabaseManager:
-    def __init__(self, db_path: str = "data/expenses.db"):
-        self.db_path = db_path
-        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        self.engine = create_engine(f"sqlite:///{db_path}")
-        self.create_tables()
-        self._migrate_schema()
+    def __init__(self, database_url: str | None = None):
+        self.database_url = database_url or settings.database_url
+        self._engine = None
+
+    @property
+    def engine(self):
+        if self._engine is None:
+            # Only create the parent directory for SQLite paths
+            if self.database_url.startswith("sqlite:///"):
+                db_path = self.database_url.replace("sqlite:///", "")
+                Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+
+            self._engine = create_engine(self.database_url)
+            SQLModel.metadata.create_all(self._engine)
+            self._migrate_schema()
+        return self._engine
 
     def create_tables(self) -> None:
         SQLModel.metadata.create_all(self.engine)
@@ -35,7 +47,12 @@ class DatabaseManager:
         `SQLModel.metadata.create_all()` only creates missing tables; it does
         not add new columns to a table that already exists. This repo has no
         Alembic, so add any newly-introduced columns here defensively.
+        Only runs for SQLite — PostgreSQL uses create_all() for new tables and
+        relies on schema upgrades being handled out-of-band.
         """
+        if not self.database_url.startswith("sqlite:///"):
+            return
+
         table_name = Expense.__tablename__
         with self.engine.connect() as conn:
             existing_columns = {

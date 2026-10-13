@@ -1,8 +1,9 @@
-import os
 import re
 from typing import Any
 
 import httpx
+
+from dashboard.config import settings
 
 from .prompt import PROMPT, STATIC_EXAMPLES
 
@@ -74,11 +75,8 @@ _BRACKET_RE = re.compile(r"\[([^\[\]]+)\]")
 
 _FALLBACK = ("Otros", "General")
 
-_DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
-
-
 def _ollama_base_url() -> str:
-    return os.environ.get("OLLAMA_BASE_URL", _DEFAULT_OLLAMA_BASE_URL)
+    return settings.ollama_base_url
 
 
 def _is_valid_category(category: str, subcategory: str) -> bool:
@@ -175,7 +173,7 @@ def _get_dynamic_examples(limit: int = 8) -> str:
 async def query_llm(
     prompt: str,
     model: str = DEFAULT_MODEL,
-    timeout: float = 60.0,
+    timeout: float = 180.0,
 ) -> str:
     async with httpx.AsyncClient(timeout=timeout) as client:
         response = await client.post(

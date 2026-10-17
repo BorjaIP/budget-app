@@ -154,4 +154,7 @@ controls (theme radius `large`), Geist (self-hosted in `assets/fonts`), sentence
 - Conventional Commits. Never stage unrelated work: add explicit paths, not `git add -A`.
 - Generated technical artifacts (code, identifiers, file names, routes, comments, docs, tests) are written in English;
   only text the user sees in the UI is Spanish (and data values such as the category names).
+- Inspiration: the finance apps in `docs/inspiration.md` (Sure, Maybe, Actual Budget, Firefly III) are credited there. Name
+  and link the source in the commit or PR of anything inspired by them and keep that file current. This repo is MIT and
+  three of them are AGPL-3.0: take ideas, never their code.
 - `odd/` and `.atl/` are local gentle-ai workflow files and are git-ignored.

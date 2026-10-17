@@ -8,7 +8,10 @@ import reflex as rx
 from dashboard.anomalies import UnusualRow, find_unusual
 from dashboard.database.operations import db_manager
 from dashboard.expenses.state import TableState
+from dashboard.overview_data import build_overview
 from dashboard.periods import DEFAULT_PRESET, PRESETS, delta_percent, resolve_period
+from dashboard.recurring import RecurringRow, find_recurring
+from dashboard.taxonomy_state import category_color
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +53,19 @@ class StatsState(rx.State):
     saved_total: float = 0.0
     daily_mode: bool = False
     unusual: list[UnusualRow] = []
+    # overview pictures and numbers (see overview_data.py)
+    segments: list[dict] = []
+    donut_svg: str = ""
+    sankey_svg: str = ""
+    pace_data: list[dict] = []
+    movers_rows: list[dict] = []
+    insight_lines: list[str] = []
+    upcoming_rows: list[RecurringRow] = []
+    upcoming_total_fmt: str = ""
+    spark_income: list[dict] = []
+    spark_spending: list[dict] = []
+    spark_balance: list[dict] = []
+    spark_rate: list[dict] = []
     data_range_label: str = ""
     chart_data: list[dict] = []
     category_breakdown: list[dict] = []
@@ -57,6 +73,51 @@ class StatsState(rx.State):
     recent_expenses: list[RecentRow] = []
     is_loading: bool = False
     load_error: bool = False
+
+    def _load_overview(self, expenses, saving, period, max_date, breakdown) -> None:
+        income = sum(d["income"] for d in self.chart_data)
+        spending = sum(d["spending"] for d in self.chart_data)
+        rate = (income - spending) / income * 100 if income > 0 else None
+        colors = {c.name: category_color(c.name) for c in db_manager.taxonomy.load()}
+        colors["Sin categorizar"] = "gray"
+        previous = (
+            db_manager.get_category_breakdown(date_from=period.prev_from, date_to=period.prev_to)
+            if period.prev_from
+            else []
+        )
+        overview = build_overview(
+            expenses=expenses,
+            saving=saving,
+            date_from=period.date_from,
+            date_to=period.date_to,
+            prev_from=period.prev_from,
+            prev_to=period.prev_to,
+            anchor=max_date,
+            breakdown=breakdown,
+            previous_breakdown=previous,
+            income_breakdown=db_manager.get_income_breakdown(period.date_from, period.date_to),
+            saved=self.saved_total,
+            spending_total=spending,
+            previous_spending=self.prev_spending,
+            savings_rate=rate,
+            recurring=find_recurring([e for e in expenses if e.category not in saving]),
+            colors=colors,
+        )
+        self.segments = overview["segments"]
+        self.donut_svg = overview["donut_svg"]
+        self.sankey_svg = overview["sankey_svg"]
+        self.pace_data = overview["pace"]
+        self.movers_rows = overview["movers"]
+        self.insight_lines = overview["insights"]
+        self.upcoming_rows = overview["upcoming"]
+        self.upcoming_total_fmt = _format_currency(overview["upcoming_total"]) if overview["upcoming"] else ""
+        recent = self.chart_data[-24:]
+        self.spark_income = [{"v": d["income"]} for d in recent]
+        self.spark_spending = [{"v": d["spending"]} for d in recent]
+        self.spark_balance = [{"v": d["balance"]} for d in recent]
+        self.spark_rate = [
+            {"v": round((d["income"] - d["spending"]) / d["income"] * 100, 1) if d["income"] > 0 else 0.0} for d in recent
+        ]
 
     @rx.var(cache=True)
     def preset_value(self) -> str:
@@ -153,6 +214,7 @@ class StatsState(rx.State):
                     limit=8, date_from=date_from, date_to=date_to
                 )
             ]
+            self._load_overview(expenses, saving, period, max_date, breakdown)
             self.recent_expenses = [
                 RecentRow(
                     id=e.id or 0,
@@ -173,6 +235,8 @@ class StatsState(rx.State):
             self.top_concepts = []
             self.recent_expenses = []
             self.unusual = []
+            self.segments, self.donut_svg, self.sankey_svg, self.pace_data = [], "", "", []
+            self.movers_rows, self.insight_lines, self.upcoming_rows = [], [], []
         finally:
             self.is_loading = False
 
@@ -265,7 +329,7 @@ class StatsState(rx.State):
         period = resolve_period(self.period, self.latest_date or None)
         return [
             TableState.drill_down(category, period.date_from or "", period.date_to or "", "expense"),
-            rx.redirect("/expenses"),
+            rx.redirect("/transactions"),
         ]
 
     @rx.event
@@ -274,14 +338,14 @@ class StatsState(rx.State):
         period = resolve_period(self.period, self.latest_date or None)
         return [
             TableState.drill_down_search(concept, period.date_from or "", period.date_to or ""),
-            rx.redirect("/expenses"),
+            rx.redirect("/transactions"),
         ]
 
     @rx.event
     def review_pending(self):
         return [
             TableState.drill_down_review,
-            rx.redirect("/expenses"),
+            rx.redirect("/transactions"),
         ]
 
 

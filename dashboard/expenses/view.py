@@ -1,5 +1,6 @@
 import reflex as rx
 
+from dashboard.components.card import card
 from dashboard.components.category_badge import category_badge
 from dashboard.taxonomy_state import TaxonomyState
 from dashboard.components.empty_state import empty_state
@@ -98,6 +99,23 @@ def _concept_text(item: Item) -> rx.Component:
     )
 
 
+def _concept_link(item: Item) -> rx.Component:
+    """The concept opens the transaction detail; a small bubble marks the ones that have a note."""
+    return rx.hstack(
+        rx.el.button(
+            _concept_text(item),
+            type="button",
+            on_click=TableState.open_detail(item.id),
+            title="Ver detalle y añadir una nota",
+            class_name="row-link",
+            style={"width": "auto", "padding": "0 0.25rem", "text_align": "left", "max_width": "100%"},
+        ),
+        rx.cond(item.note != "", icon("note", size=13, color=rx.color("gray", 10), title="Tiene una nota"), rx.fragment()),
+        spacing="1",
+        align="center",
+    )
+
+
 def _select_box(item: Item) -> rx.Component:
     return rx.checkbox(
         checked=TableState.selected_ids.contains(item.id),
@@ -112,7 +130,7 @@ def _row(item: Item) -> rx.Component:
     return rx.table.row(
         rx.table.cell(_select_box(item), width="2.5em"),
         rx.table.cell(rx.text(item.operation_date_human, class_name="num", white_space="nowrap")),
-        rx.table.cell(_concept_text(item)),
+        rx.table.cell(_concept_link(item)),
         rx.table.cell(category_badge(item)),
         rx.table.cell(_amount_text(item), justify="end"),
         rx.table.cell(_balance_text(item), justify="end"),
@@ -138,7 +156,19 @@ def _mobile_item(item: Item) -> rx.Component:
             width="100%",
             align="center",
         ),
-        rx.text(item.concept, size="2", weight="medium", width="100%", style=_TRUNCATE),
+        rx.hstack(
+            rx.el.button(
+                rx.text(item.concept, size="2", weight="medium", style=_TRUNCATE),
+                type="button",
+                on_click=TableState.open_detail(item.id),
+                class_name="row-link",
+                style={"width": "auto", "padding": "0", "text_align": "left", "min_width": "0"},
+            ),
+            rx.cond(item.note != "", icon("note", size=13, color=rx.color("gray", 10)), rx.fragment()),
+            spacing="1",
+            align="center",
+            width="100%",
+        ),
         rx.hstack(
             category_badge(item),
             rx.spacer(),
@@ -719,6 +749,84 @@ def _upload_modal() -> rx.Component:
     )
 
 
+def _fact(label: str, value) -> rx.Component:
+    return rx.vstack(
+        rx.text(label, size="1", color=rx.color("gray", 11)),
+        value if not isinstance(value, str) else rx.text(value, size="2"),
+        spacing="1",
+        align="start",
+    )
+
+
+def _detail_dialog() -> rx.Component:
+    """One transaction in full: its facts, its category and a free note."""
+    item = TableState.detail
+    return rx.dialog.root(
+        rx.dialog.content(
+            rx.dialog.title(item.concept, style={"overflow_wrap": "anywhere", "padding_right": "1.5rem"}),
+            rx.dialog.description(
+                rx.text(
+                    item.amount_fmt,
+                    size="5",
+                    weight="medium",
+                    class_name="num",
+                    color=rx.cond(item.is_expense, rx.color("red", 11), rx.color("green", 11)),
+                ),
+            ),
+            rx.grid(
+                _fact("Fecha", item.operation_date_human),
+                _fact("Fecha valor", item.value_date_human),
+                _fact("Banco", rx.cond(item.bank_name, item.bank_name, "-")),
+                _fact("Saldo tras el movimiento", item.balance_fmt),
+                _fact("Categoría", category_badge(item)),
+                _fact("Cómo se categorizó", item.source_text),
+                columns=rx.breakpoints(initial="1", sm="2"),
+                gap="1rem",
+                margin_top="1.25rem",
+                width="100%",
+            ),
+            rx.vstack(
+                rx.text("Nota", size="2", weight="medium"),
+                rx.text_area(
+                    value=TableState.detail_note,
+                    on_change=TableState.set_detail_note,
+                    placeholder="Por ejemplo: para qué fue este movimiento",
+                    max_length=500,
+                    rows="4",
+                    size="2",
+                    width="100%",
+                    custom_attrs={"aria-label": "Nota de la transacción"},
+                ),
+                rx.text(
+                    "Solo la ves tú: no se envía al modelo ni a ningún sitio. Se puede buscar desde Transacciones.",
+                    size="1",
+                    color=rx.color("gray", 11),
+                ),
+                spacing="2",
+                width="100%",
+                align="start",
+                margin_top="1.25rem",
+            ),
+            rx.flex(
+                rx.dialog.close(rx.button("Cerrar", variant="soft", color_scheme="gray")),
+                rx.button(
+                    "Guardar nota",
+                    color_scheme="gray",
+                    high_contrast=True,
+                    disabled=~TableState.detail_note_changed,
+                    on_click=TableState.save_note,
+                ),
+                spacing="3",
+                margin_top="1.25rem",
+                justify="end",
+            ),
+            max_width="560px",
+        ),
+        open=TableState.show_detail,
+        on_open_change=TableState.set_show_detail,
+    )
+
+
 def _skeleton_rows() -> rx.Component:
     return rx.vstack(
         *[rx.skeleton(height="3em", width="100%") for _ in range(6)],
@@ -760,10 +868,10 @@ def _table_or_empty() -> rx.Component:
 
 def main_table() -> rx.Component:
     return rx.vstack(
-        _toolbar(),
-        _filters(),
+        card(rx.vstack(_toolbar(), _filters(), spacing="3", width="100%"), padding=["0.75rem", "1rem", "1rem"]),
         _bulk_bar(),
         _upload_modal(),
+        _detail_dialog(),
         _table_or_empty(),
         rx.cond(TableState.total_items > 0, _pagination(), rx.fragment()),
         spacing="4",

@@ -56,12 +56,15 @@ def build_rows(rng: random.Random) -> list[Expense]:
         start = month_start(ANCHOR, back)
         days = 28 if back else ANCHOR.day
         pay_day = min(27, days)
-        rows.append(_row(rng, start + timedelta(days=pay_day - 1), INCOME[0][0], rng.uniform(*INCOME[0][1]), None, None))
+        rows.append(_row(rng, start + timedelta(days=pay_day - 1), INCOME[0][0], rng.uniform(*INCOME[0][1]), "Nómina", None))
         if rng.random() < 0.3:
             rows.append(_row(rng, start + timedelta(days=rng.randrange(days)), INCOME[1][0], rng.uniform(*INCOME[1][1]), None, None))
         for category, sub, concepts, (low, high), times in SPENDING:
             for _ in range(times):
-                day = start + timedelta(days=rng.randrange(days))
+                if times == 1 and len(concepts) == 1:  # a monthly bill arrives on the same day every month
+                    day = start + timedelta(days=min(sum(map(ord, concepts[0])) % 27, days - 1))
+                else:
+                    day = start + timedelta(days=rng.randrange(days))
                 rows.append(_row(rng, day, rng.choice(concepts), -rng.uniform(low, high), category, sub))
     rows.sort(key=lambda r: r.operation_date)
     balance = 3200.0

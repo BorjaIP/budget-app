@@ -65,11 +65,11 @@ def _recategorize_dialog() -> rx.Component:
     )
 
 
-@template(route="/expenses", title="Gastos", on_load=TableState.load_entries_from_database)
+@template(route="/transactions", title="Transacciones", on_load=TableState.load_entries_from_database)
 def expenses() -> rx.Component:
     return rx.vstack(
         page_header(
-            "Gastos",
+            "Transacciones",
             actions=rx.hstack(
                 rx.cond(
                     TableState.has_results,

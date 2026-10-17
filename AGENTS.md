@@ -55,7 +55,7 @@ The Reflex app is configured in `rxconfig.py` with `app_name="dashboard"`. Entry
 
 ### Key layers (all under `dashboard/`)
 
-- **Pages** (`pages/`): route handlers. The expenses page is at `expenses/page.py` → `/expenses`.
+- **Pages** (`pages/`): route handlers. The transactions page (module `expenses/`, UI name "Transacciones") is at `expenses/page.py` → `/transactions`.
 - **State** (`expenses/state.py`): `TableState`, the Reflex reactive state for pagination, filtering, sorting, uploads, categorization and database access.
 - **Config** (`config.py`): `Settings` (pydantic-settings) reads environment variables and `.env`: `DATABASE_URL` (default `sqlite:///data/expenses.db`; PostgreSQL in Docker), `OLLAMA_BASE_URL`, `LOG_LEVEL`, `uploaded_files_dir`.
 - **Database** (`database/`): `DatabaseManager` in `operations.py` wraps SQLModel and creates its engine lazily from `settings.database_url`. `models.py` defines the `Expense` table. Schema changes on existing SQLite databases go through the additive guarded migration in `DatabaseManager._migrate_schema` (SQLite only; there is no Alembic).
@@ -87,7 +87,17 @@ A progress strip shows on every page while it runs. Manual rows are never overwr
 
 New columns on `expense` go through `DatabaseManager._ADDED_COLUMNS` (works on SQLite and PostgreSQL).
 `scripts/eval_similarity.py` measures similarity strategies on the owner's own labels (aggregates only).
-Background and references: `docs/categorization-strategy.md`.
+The order and where rules come from are explained in `docs/how-categorization-works.md`; background and references in `docs/categorization-strategy.md`.
+
+### Overview
+
+The overview (`pages/index.py`, `views/overview_cards.py`) is computed by pure functions so it can be tested:
+`overview.py` (donut and cash-flow SVG strings, pace series, category changes, summary sentences; every name that
+reaches an SVG is escaped) and `overview_data.py` (assembles them for `StatsState`). Transfers to saving categories
+never enter income or spending. `recurring.py` finds monthly charges, estimates the next one (bills that vary, like
+electricity, need the same day each month and four months of history) and lists what is still to come this month.
+The "Reglas" tab of Ajustes (`rules_state.py`, `views/rules_panel.py`) shows the learned merchant rules
+(`MerchantLabel`) and lets the user create, change and forget them (`DatabaseManager.save_rule/delete_rule`).
 
 ### Logging
 
@@ -116,8 +126,9 @@ No VPN container is part of the stack.
 
 ## UI conventions
 
-Minimalist look: warm sand grays, a neutral accent, 1px hairline borders, no shadows or gradients,
-Geist (self-hosted in `assets/fonts`), sentence case and no emojis.
+Clean card look inspired by Sure (the Maybe fork): a soft gray page with white cards (`components/card.py`,
+radius 14 px, 1px hairline border, a barely visible shadow), neutral grays, a near-black primary button, rounded
+controls (theme radius `large`), Geist (self-hosted in `assets/fonts`), sentence case and no emojis.
 
 - Reuse the shared pieces: `components/card.py` (surface), `page_header.py`, `empty_state.py`,
   `notice.py` (inline error with retry) and `icon.py` (Radix Icons; do not use `rx.icon`, it renders Lucide).
@@ -143,4 +154,7 @@ Geist (self-hosted in `assets/fonts`), sentence case and no emojis.
 - Conventional Commits. Never stage unrelated work: add explicit paths, not `git add -A`.
 - Generated technical artifacts (code, identifiers, file names, routes, comments, docs, tests) are written in English;
   only text the user sees in the UI is Spanish (and data values such as the category names).
+- Inspiration: the finance apps in `docs/inspiration.md` (Sure, Maybe, Actual Budget, Firefly III) are credited there. Name
+  and link the source in the commit or PR of anything inspired by them and keep that file current. This repo is MIT and
+  three of them are AGPL-3.0: take ideas, never their code.
 - `odd/` and `.atl/` are local gentle-ai workflow files and are git-ignored.

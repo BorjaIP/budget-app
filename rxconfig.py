@@ -10,4 +10,5 @@ config = rx.Config(
     app_name="dashboard",
     plugins=[RadixThemesPlugin()],
     disable_plugins=[SitemapPlugin],
+    show_built_with_reflex=False,  # no sticky "Built with Reflex" badge in production
 )

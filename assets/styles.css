@@ -15,6 +15,11 @@ body {
     overflow-y: scroll;
 }
 
+/* A soft gray page with white cards on top (dark mode keeps Radix defaults). */
+.radix-themes:where(:not(.dark, .dark-theme)) {
+    --color-background: var(--gray-2);
+}
+
 /* Money and counters: digits keep a fixed width so columns line up. */
 .num {
     font-variant-numeric: tabular-nums;

@@ -17,6 +17,7 @@ class ExpenseBase(SQLModel):
     bank_name: Optional[str] = Field(default=None, index=True)
     is_categorized: bool = Field(default=False, index=True)
     category_source: Optional[str] = Field(default=None)  # manual | memory | llm
+    note: Optional[str] = Field(default=None, description="Free text the user adds to a transaction")
     category_confidence: Optional[float] = Field(
         default=None, description="Model confidence in 0..1; set only for llm-assigned categories"
     )

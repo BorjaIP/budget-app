@@ -25,6 +25,7 @@ _TAGS = {
     "sun": "SunIcon",
     "moon": "MoonIcon",
     "magic-wand": "MagicWandIcon",
+    "note": "ChatBubbleIcon",
     "pie-chart": "PieChartIcon",
     "info-circled": "InfoCircledIcon",
 }
